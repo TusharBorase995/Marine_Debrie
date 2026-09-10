@@ -303,22 +303,15 @@ class ReportAnalysisService:
             "evidence_completeness_pct": round(evidence_available_count / total_targets * 100, 1) if total_targets else 0.0
         }
 
-        # 10. Operational Assessment (Deterministic Textual Assessment)
+        # 10. Operational Assessment
         if total_targets == 0:
-            operational_assessment = (
-                f"Mission '{survey_name}' ({mission_id}) recorded no target contacts or acoustic anomalies. "
-                "Database records for this survey session are currently clear, pending real-time telemetry "
-                "or batch sonar import."
-            )
+            operational_assessment = f"No targets recorded for mission '{survey_name}' ({mission_id})."
         else:
-            sec_text = f"Target density was highest in {highest_density_sector_name}." if highest_density_sector_name != "N/A" else "Geographic coordinates were clustered in a single survey pass."
+            sec_text = f" Density highest in {highest_density_sector_name}." if highest_density_sector_name != "N/A" else ""
             operational_assessment = (
-                f"The mission identified {total_targets} potential acoustic targets across the surveyed area. "
-                f"{dominant_class} represented the largest detected class, accounting for {dominant_class_pct}% "
-                f"of total target candidates. Overall mean classification confidence stands at {avg_confidence}%, "
-                f"with {shadow_verified_count} targets ({shadow_verified_pct}%) confirmed through acoustic shadow analysis. "
-                f"{sec_text} At the time of report compilation, {pending_count} observations remain pending human review, "
-                f"while {confirmed_count} have been verified and {rejected_count} filtered."
+                f"{total_targets} acoustic targets detected ({avg_confidence}% mean confidence). "
+                f"{confirmed_count} confirmed, {rejected_count} rejected, {pending_count} pending review. "
+                f"{shadow_verified_count} shadow-verified.{sec_text}"
             )
 
         # 11. Mission Timeline (Aggregated Milestones)

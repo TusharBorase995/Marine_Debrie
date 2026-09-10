@@ -366,17 +366,11 @@ export default function Detections() {
       {/* 1. Header & Quick Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-2xs border border-[#E5EDF5]">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-[#0284C7] uppercase tracking-wider bg-[#EAF2FD] px-2.5 py-0.5 rounded-full border border-[#BAE6FD]">
-              PHYSICAL TARGETS REPOSITORY
-            </span>
-            <span className="text-xs text-[#64748B] font-mono">1 Target = 1 GIS Marker</span>
-          </div>
-          <h2 className="text-xl font-black text-[#0B192C] tracking-tight mt-1">
-            Marine Hazard & Acoustic Contacts Catalog
+          <h2 className="text-xl font-black text-[#0B192C] tracking-tight">
+            Acoustic Detections
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5">
-            Comprehensive audit table of all detected anomalies with confidence, georeference, and analyst review status.
+            Review and ground-truth detected targets and acoustic anomalies.
           </p>
         </div>
 

@@ -103,18 +103,11 @@ export const Reports = () => {
       {/* 1. Header Action Banner */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] text-blue-700 font-bold uppercase tracking-wider bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-              OPERATIONAL MISSION REPORTING
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Unified Analysis Engine</span>
-          </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Hydrographic Survey Mission Reports
+            Mission Reports
           </h1>
-          <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            Standardized operational assessments, acoustic target classifications, and geographic density distribution.
-            Both PDF and Excel exports are compiled from the identical verified statistical analysis layer.
+          <p className="text-xs text-slate-500 mt-1 font-medium">
+            Export hydrographic survey analytics and target data in PDF and Excel formats.
           </p>
         </div>
 
@@ -247,7 +240,7 @@ export const Reports = () => {
             <div className="flex items-center gap-2 mb-2">
               <Activity className="w-4 h-4 text-blue-700" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-blue-900">
-                Deterministic Operational Assessment
+                Mission Summary
               </h3>
             </div>
             {loading ? (

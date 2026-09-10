@@ -176,17 +176,11 @@ export default function Surveys() {
       {/* 1. Header & Actions */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-100">
-              MISSION MANAGEMENT
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Independent Hydrographic Surveys</span>
-          </div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-            Surveys & Mission Management Hub
+            Surveys & Missions
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Configure independent acoustic surveys. Each mission uses strictly <strong>either Live ML Streaming OR Batch Import</strong> to ingest ML detection results.
+            Manage acoustic survey missions and targets.
           </p>
         </div>
 

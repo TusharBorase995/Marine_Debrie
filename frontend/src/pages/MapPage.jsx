@@ -201,9 +201,8 @@ export default function MapPage() {
             </div>
             <div>
               <h2 className="text-sm font-extrabold text-slate-900 tracking-tight leading-none">
-                GIS Georeferenced Spatial Analysis
+                GIS Spatial Map
               </h2>
-              <p className="text-[11px] text-slate-400 mt-0.5">1 Physical Target = 1 GIS Marker</p>
             </div>
           </div>
 

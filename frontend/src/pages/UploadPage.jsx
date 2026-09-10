@@ -157,19 +157,11 @@ export const UploadPage = () => {
       {/* 1. Header Banner */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-100">
-              ML RESULT INGESTION HUB
-            </span>
-            <span className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-2.5 py-0.5 rounded-full border border-emerald-200">
-              DUAL INGESTION MODES
-            </span>
-          </div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-            ML Detection Ingestion & Streaming Hub
+            Ingestion Hub
           </h2>
-          <p className="text-xs text-slate-500 mt-1 max-w-3xl leading-relaxed">
-            The application is an ML-result consumer. When a mission is created, it uses either <strong>Live ML Streaming (Mode A)</strong> or <strong>Batch Package Import (Mode B)</strong>. Both modes normalize into the canonical detection model.
+          <p className="text-xs text-slate-500 mt-1">
+            Receive real-time detection telemetry or import post-survey batch packages.
           </p>
         </div>
 
@@ -315,8 +307,8 @@ export const UploadPage = () => {
               </span>
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              The ML system streams detections continuously one-by-one as computer-vision inference executes onboard. New arrivals appear immediately on the Dashboard, GIS Map, and Target Review list via WebSocket <code className="text-indigo-600 font-bold">/ws/live-feed</code> with subtle professional arrival animations.
+            <p className="text-xs text-slate-500">
+              Live stream listener for real-time detections over WebSocket.
             </p>
 
             {/* Real-Time Live Feed Status Box */}
@@ -344,8 +336,8 @@ export const UploadPage = () => {
                 </div>
               </div>
 
-              <div className="text-[11px] text-slate-600 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
-                Active telemetry listener. Real detection packages received from shipboard inference models via <code className="text-indigo-600 font-bold">POST /api/detections</code> will automatically appear here and broadcast instantly across the workstation.
+              <div className="text-[11px] text-slate-500 bg-white p-2.5 rounded-lg border border-slate-200 font-mono">
+                Listening on <code className="text-indigo-600 font-bold">POST /api/detections</code>
               </div>
             </div>
 
@@ -376,7 +368,7 @@ export const UploadPage = () => {
               </div>
             ) : (
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-400">
-                Awaiting real incoming ML inference detections via <code className="text-indigo-600">POST /api/detections</code>.
+                Awaiting incoming stream...
               </div>
             )}
           </div>
@@ -423,8 +415,8 @@ export const UploadPage = () => {
               </span>
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              The ML provides completed mission results as <strong>detections.json + images/</strong> (or a single ZIP archive containing them). The ingestion engine validates schema, extracts images, validates ocean geocoordinates, and consolidates physical targets.
+            <p className="text-xs text-slate-500">
+              Import completed survey packages (.ZIP with detections and images, or .JSON).
             </p>
 
             {/* Batch Form */}
