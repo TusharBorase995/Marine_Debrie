@@ -43,6 +43,21 @@ export const missionService = {
     return this.deleteMission(missionId);
   },
 
+  async setActive(missionId) {
+    const res = await axios.post(`${API_BASE}/${missionId}/active`);
+    return res.data;
+  },
+
+  async deactivate() {
+    const res = await axios.post(`${API_BASE}/deactivate`);
+    return res.data;
+  },
+
+  async getActive() {
+    const res = await axios.get(`${API_BASE}/active`);
+    return res.data;
+  },
+
   getExportUrl(missionId, format = 'json') {
     return `${API_BASE}/${missionId}/export?format=${format}`;
   }

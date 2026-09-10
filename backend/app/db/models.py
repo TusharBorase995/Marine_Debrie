@@ -40,6 +40,7 @@ class MissionModel(Base):
     survey_name = Column(String(255), nullable=False)
     ingestion_mode = Column(String(32), default="batch", nullable=False)  # 'live' or 'batch'
     status = Column(String(32), default="completed", nullable=False)      # 'active', 'completed', 'archived'
+    is_active = Column(Boolean, default=False, nullable=False)
     acoustic_freq = Column(String(32), default="410 kHz")
     swath_width_m = Column(Float, default=120.0)
     depth_m = Column(Float, default=84.2)
@@ -61,6 +62,7 @@ class MissionModel(Base):
             "survey_name": self.survey_name,
             "ingestion_mode": self.ingestion_mode,
             "status": self.status,
+            "is_active": bool(self.is_active),
             "acoustic_freq": self.acoustic_freq,
             "swath_width_m": self.swath_width_m,
             "depth_m": self.depth_m,
@@ -87,12 +89,15 @@ class TargetModel(Base):
     image_id = Column(String(64), ForeignKey("sonar_images.image_id", ondelete="SET NULL"), nullable=True)
     target_class = Column(String(64), nullable=False, index=True)  # e.g. 'debris_net', 'pipe_cylinder'
     label = Column(String(255), nullable=True)
-    latitude = Column(Float, nullable=False, index=True)
-    longitude = Column(Float, nullable=False, index=True)
+    latitude = Column(Float, nullable=True, index=True)
+    longitude = Column(Float, nullable=True, index=True)
     estimated_size_m = Column(Float, default=3.0)
     fused_confidence = Column(Float, default=0.85)
     status = Column(String(32), default="pending_review", index=True)  # 'pending_review', 'confirmed', 'rejected'
     sonar_image_ref = Column(String(512), nullable=True)
+    bounding_box = Column(JSON, nullable=True)
+    segmentation = Column(JSON, nullable=True)
+    mask_ref = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -104,6 +109,7 @@ class TargetModel(Base):
     def to_dict(self):
         obs_dicts = [obs.to_dict() for obs in (self.observations or [])]
         image_url = f"/api/images/{self.image_id}" if self.image_id else self.sonar_image_ref
+        latest_obs = obs_dicts[-1] if obs_dicts else {}
         return {
             "target_id": self.target_id,
             "id": self.target_id,  # Compatibility alias
@@ -112,14 +118,17 @@ class TargetModel(Base):
             "class": self.target_class,
             "category": self.target_class,
             "label": self.label or self.target_class.replace("_", " ").title(),
-            "latitude": round(self.latitude, 6),
-            "longitude": round(self.longitude, 6),
+            "latitude": round(self.latitude, 6) if self.latitude is not None else None,
+            "longitude": round(self.longitude, 6) if self.longitude is not None else None,
             "estimated_size_m": round(self.estimated_size_m, 1),
             "confidence": round(self.fused_confidence, 2),
             "fused_confidence": round(self.fused_confidence, 2),
             "status": self.status,
             "human_review_status": self.status,
             "sonar_image_ref": image_url,
+            "bounding_box": self.bounding_box if self.bounding_box is not None else latest_obs.get("bounding_box"),
+            "segmentation": self.segmentation if self.segmentation is not None else latest_obs.get("segmentation"),
+            "mask_ref": self.mask_ref or latest_obs.get("mask_ref"),
             "observation_count": len(obs_dicts) or 1,
             "observations": obs_dicts,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -142,12 +151,14 @@ class ObservationModel(Base):
     survey_leg = Column(String(128), nullable=True)
     target_class = Column(String(64), nullable=False)
     confidence = Column(Float, default=0.85)
-    latitude = Column(Float, nullable=False)
-    longitude = Column(Float, nullable=False)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
     estimated_size_m = Column(Float, default=3.0)
     shadow_verified = Column(Boolean, default=True)
     status = Column(String(32), default="pending_review")
     bounding_box = Column(JSON, nullable=True)
+    segmentation = Column(JSON, nullable=True)
+    mask_ref = Column(String(512), nullable=True)
     sonar_image_ref = Column(String(512), nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -167,13 +178,15 @@ class ObservationModel(Base):
             "class": self.target_class,
             "category": self.target_class,
             "confidence": round(self.confidence, 2),
-            "latitude": round(self.latitude, 6),
-            "longitude": round(self.longitude, 6),
+            "latitude": round(self.latitude, 6) if self.latitude is not None else None,
+            "longitude": round(self.longitude, 6) if self.longitude is not None else None,
             "estimated_size_m": round(self.estimated_size_m, 1),
             "shadow_verified": self.shadow_verified,
             "status": self.status,
             "human_review_status": self.status,
-            "bounding_box": self.bounding_box or {"x": 100, "y": 100, "width": 200, "height": 200},
+            "bounding_box": self.bounding_box,
+            "segmentation": self.segmentation,
+            "mask_ref": self.mask_ref,
             "sonar_image_ref": image_url,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None
         }

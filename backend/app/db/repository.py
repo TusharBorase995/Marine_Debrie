@@ -10,16 +10,27 @@ from app.db.models import MissionModel, TargetModel, ObservationModel, SonarImag
 logger = logging.getLogger("sonar_repository")
 
 def init_tables():
-    """Initializes database schema tables, handling schema migration for image_id columns."""
+    """Initializes database schema tables, ensuring all tables and columns exist without dropping any data."""
     try:
         with engine.connect() as conn:
-            from sqlalchemy import inspect
+            from sqlalchemy import inspect, text
             inspector = inspect(engine)
             if inspector.has_table("targets"):
                 columns = [c["name"] for c in inspector.get_columns("targets")]
+                # Migrate any missing columns non-destructively; NEVER drop tables
+                if "segmentation" not in columns:
+                    conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS segmentation JSON;"))
+                if "bounding_box" not in columns:
+                    conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS bounding_box JSON;"))
                 if "image_id" not in columns:
-                    logger.info("Migrating database schema: Recreating tables to support image_id column...")
-                    Base.metadata.drop_all(bind=engine)
+                    conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS image_id VARCHAR(64);"))
+                conn.commit()
+
+            if inspector.has_table("missions"):
+                m_columns = [c["name"] for c in inspector.get_columns("missions")]
+                if "is_active" not in m_columns:
+                    conn.execute(text("ALTER TABLE missions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;"))
+                conn.commit()
 
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully.")
@@ -97,6 +108,106 @@ class SonarRepository:
             return m.to_dict() if m else None
 
     @classmethod
+    def get_active_mission(cls) -> Optional[Dict[str, Any]]:
+        """Returns the mission currently marked as active, or None if no mission is selected."""
+        with cls.get_session() as session:
+            m = (
+                session.query(MissionModel)
+                .options(selectinload(MissionModel.targets).selectinload(TargetModel.observations))
+                .filter(MissionModel.is_active == True)
+                .first()
+            )
+            return m.to_dict() if m else None
+
+    @classmethod
+    def set_active_mission(cls, mission_id: str) -> Optional[Dict[str, Any]]:
+        """Marks specified mission as active and deactivates all others."""
+        with cls.get_session() as session:
+            target_m = session.query(MissionModel).filter(MissionModel.mission_id == mission_id).first()
+            if not target_m:
+                return None
+            session.query(MissionModel).filter(MissionModel.mission_id != mission_id).update({"is_active": False})
+            target_m.is_active = True
+            session.commit()
+            session.refresh(target_m)
+            return target_m.to_dict()
+
+    @classmethod
+    def deactivate_all_missions(cls) -> bool:
+        """Clears active flag from all missions."""
+        with cls.get_session() as session:
+            session.query(MissionModel).update({"is_active": False})
+            session.commit()
+            return True
+
+    @classmethod
+    def generate_next_mission_id(cls) -> str:
+        """
+        Calculates the next serial mission ID based on existing missions (e.g. MISSION-001, MISSION-002).
+        Never produces random timestamps or hashes.
+        """
+        import re
+        with cls.get_session() as session:
+            missions = session.query(MissionModel.mission_id).all()
+            highest_num = 0
+            for (m_id,) in missions:
+                match = re.search(r"MISSION-(\d+)", str(m_id).upper())
+                if match:
+                    try:
+                        num = int(match.group(1))
+                        if num > highest_num:
+                            highest_num = num
+                    except ValueError:
+                        pass
+            if highest_num == 0:
+                highest_num = len(missions)
+            return f"MISSION-{highest_num + 1:03d}"
+
+    @classmethod
+    def create_serial_mission(cls, ingestion_mode: str = "live", survey_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Creates the next sequential serial mission (e.g. MISSION-001, MISSION-002)
+        and sets it as active.
+        """
+        next_id = cls.generate_next_mission_id()
+        num_str = next_id.split("-")[-1]
+        name = survey_name or f"Survey Mission {num_str}"
+        new_mission = {
+            "mission_id": next_id,
+            "survey_name": name,
+            "description": f"Sequential acoustic hydrographic survey mission {num_str}.",
+            "ingestion_mode": ingestion_mode,
+            "status": "in_progress" if ingestion_mode == "live" else "completed",
+            "is_active": True
+        }
+        return cls.create_or_update_mission(new_mission)
+
+    @classmethod
+    def resolve_target_mission(cls, specified_mission_id: Optional[str] = None, ingestion_mode: str = "live") -> str:
+        """
+        Pushes incoming detection data to:
+        1. Explicit valid existing mission_id if provided.
+        2. Currently selected active mission (if one exists).
+        3. ONLY if NO mission is active, creates a new serial-wise mission (e.g. MISSION-002)
+           and marks it active.
+        """
+        # 1. Check if an explicit valid mission was provided and exists
+        if specified_mission_id and str(specified_mission_id).strip() not in ["", "None", "MISSION-LIVE", "ALL"]:
+            clean_id = str(specified_mission_id).strip()
+            existing = cls.get_mission(clean_id)
+            if existing:
+                return clean_id
+
+        # 2. Check if an active mission is currently selected
+        active = cls.get_active_mission()
+        if active:
+            return active["mission_id"]
+
+        # 3. No mission is active: create a sequential serial mission and set active
+        new_m = cls.create_serial_mission(ingestion_mode=ingestion_mode)
+        return new_m["mission_id"]
+
+    @classmethod
     def delete_mission(cls, mission_id: str) -> bool:
         """Deletes a mission and all its cascaded targets/observations from PostgreSQL."""
         with cls.get_session() as session:
@@ -110,24 +221,35 @@ class SonarRepository:
     @classmethod
     def create_or_update_mission(cls, mission_dict: Dict[str, Any]) -> Dict[str, Any]:
         with cls.get_session() as session:
-            m_id = mission_dict.get("mission_id", f"MISSION-{int(datetime.now().timestamp())}")
+            m_id = mission_dict.get("mission_id") or cls.generate_next_mission_id()
             existing = session.query(MissionModel).filter(MissionModel.mission_id == m_id).first()
+            is_act = bool(mission_dict.get("is_active", False))
+
             if existing:
                 existing.survey_name = mission_dict.get("survey_name", existing.survey_name)
                 existing.ingestion_mode = mission_dict.get("ingestion_mode", existing.ingestion_mode)
                 existing.status = mission_dict.get("status", existing.status)
                 if "description" in mission_dict:
                     existing.description = mission_dict["description"]
+                if "is_active" in mission_dict:
+                    existing.is_active = is_act
+                    if is_act:
+                        session.query(MissionModel).filter(MissionModel.mission_id != m_id).update({"is_active": False})
             else:
+                if is_act:
+                    session.query(MissionModel).update({"is_active": False})
+                num_suffix = m_id.split("-")[-1]
+                default_name = f"Survey Mission {num_suffix}"
                 existing = MissionModel(
                     mission_id=m_id,
-                    survey_name=mission_dict.get("survey_name", f"Survey Mission {m_id}"),
+                    survey_name=mission_dict.get("survey_name", default_name),
                     ingestion_mode=mission_dict.get("ingestion_mode", "batch"),
                     status=mission_dict.get("status", "completed"),
+                    is_active=is_act,
                     acoustic_freq=mission_dict.get("acoustic_freq", "410 kHz"),
                     swath_width_m=float(mission_dict.get("swath_width_m", 120.0)),
                     depth_m=float(mission_dict.get("depth_m", 84.2)),
-                    description=mission_dict.get("description", "Imported hydrographic survey batch.")
+                    description=mission_dict.get("description", f"Acoustic hydrographic survey mission {num_suffix}.")
                 )
                 session.add(existing)
             session.commit()
@@ -206,8 +328,8 @@ class SonarRepository:
             det_id = det.get("id") or f"det_{int(datetime.now().timestamp() * 1000)}"
             cls_name = det.get("class") or det.get("category") or "debris_net"
             conf = float(det.get("confidence", 0.85))
-            lat = float(det.get("latitude", 32.6500))
-            lon = float(det.get("longitude", -117.5500))
+            lat = float(det["latitude"]) if det.get("latitude") is not None else None
+            lon = float(det["longitude"]) if det.get("longitude") is not None else None
             size = float(det.get("estimated_size_m", 3.0))
             stat = det.get("status", "pending_review")
             if stat in ["verified", "confirmed"]:
@@ -244,7 +366,10 @@ class SonarRepository:
                     estimated_size_m=size,
                     fused_confidence=conf,
                     status=stat,
-                    sonar_image_ref=img_ref
+                    sonar_image_ref=img_ref,
+                    bounding_box=det.get("bounding_box"),
+                    segmentation=det.get("segmentation"),
+                    mask_ref=det.get("mask_ref")
                 )
                 session.add(target)
                 session.flush()
@@ -253,16 +378,26 @@ class SonarRepository:
                 # Target exists: recalculate pass count and centroid
                 existing_obs = session.query(ObservationModel).filter(ObservationModel.target_id == target_id).all()
                 pass_num = len(existing_obs) + 1
-                all_confs = [o.confidence for o in existing_obs] + [conf]
-                all_lats = [o.latitude for o in existing_obs] + [lat]
-                all_lons = [o.longitude for o in existing_obs] + [lon]
-                target.fused_confidence = round(max(all_confs) * 0.75 + (sum(all_confs) / len(all_confs)) * 0.25, 2)
-                target.latitude = round(sum(all_lats) / len(all_lats), 6)
-                target.longitude = round(sum(all_lons) / len(all_lons), 6)
+                all_confs = [o.confidence for o in existing_obs if o.confidence is not None] + [conf]
+                all_lats = [o.latitude for o in existing_obs if o.latitude is not None]
+                if lat is not None:
+                    all_lats.append(lat)
+                all_lons = [o.longitude for o in existing_obs if o.longitude is not None]
+                if lon is not None:
+                    all_lons.append(lon)
+                target.fused_confidence = round(max(all_confs) * 0.75 + (sum(all_confs) / len(all_confs)) * 0.25, 2) if all_confs else conf
+                target.latitude = round(sum(all_lats) / len(all_lats), 6) if all_lats else None
+                target.longitude = round(sum(all_lons) / len(all_lons), 6) if all_lons else None
                 if img_ref:
                     target.sonar_image_ref = img_ref
                 if image_id:
                     target.image_id = image_id
+                if det.get("bounding_box"):
+                    target.bounding_box = det.get("bounding_box")
+                if det.get("segmentation"):
+                    target.segmentation = det.get("segmentation")
+                if det.get("mask_ref"):
+                    target.mask_ref = det.get("mask_ref")
 
             obs = session.query(ObservationModel).filter(ObservationModel.id == det_id).first()
             if obs:
@@ -278,6 +413,8 @@ class SonarRepository:
                 obs.shadow_verified = bool(det.get("shadow_verified", True))
                 obs.status = stat
                 obs.bounding_box = det.get("bounding_box")
+                obs.segmentation = det.get("segmentation")
+                obs.mask_ref = det.get("mask_ref")
                 if img_ref:
                     obs.sonar_image_ref = img_ref
             else:
@@ -296,6 +433,8 @@ class SonarRepository:
                     shadow_verified=bool(det.get("shadow_verified", True)),
                     status=stat,
                     bounding_box=det.get("bounding_box"),
+                    segmentation=det.get("segmentation"),
+                    mask_ref=det.get("mask_ref"),
                     sonar_image_ref=img_ref
                 )
                 session.add(obs)

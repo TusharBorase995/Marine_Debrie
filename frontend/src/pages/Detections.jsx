@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Target, CheckCircle2, XCircle, RefreshCw, 
@@ -8,6 +8,7 @@ import {
 import detectionService from '../services/detectionService';
 import targetService from '../services/targetService';
 import DetectionDetailPanel from '../components/DetectionDetailPanel';
+import EvidenceViewerModal from '../components/EvidenceViewerModal';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useMission } from '../context/MissionContext';
 import { 
@@ -47,11 +48,10 @@ export default function Detections() {
 
   // Selected Target for Detailed Inspection View
   const [selectedItem, setSelectedItem] = useState(null);
+  const [isEvidenceModalOpen, setIsEvidenceModalOpen] = useState(false);
   const [recentNewId, setRecentNewId] = useState(null);
-
-  // Clear modal state
-  const [showClearModal, setShowClearModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const initialSelectionDoneRef = useRef(false);
 
   // Real-Time WebSocket Live Feed Integration
   const { data: wsData } = useWebSocket('/ws/live-feed');
@@ -69,12 +69,19 @@ export default function Detections() {
       setDetections(validDetections);
 
       if (validTargets.length > 0) {
-        // Keep currently selected item if still present, else select first
-        setSelectedItem(prev => {
-          if (!prev) return validTargets[0];
-          const match = validTargets.find(t => (t.target_id || t.id) === (prev.target_id || prev.id));
-          return match || validTargets[0];
-        });
+        // Auto-select first target ONLY on initial start
+        if (!initialSelectionDoneRef.current) {
+          setSelectedItem(validTargets[0]);
+          setSelectedTargetId(validTargets[0].target_id || validTargets[0].id);
+          initialSelectionDoneRef.current = true;
+        } else {
+          // If user currently has an item selected, update reference. If null, keep closed!
+          setSelectedItem(prev => {
+            if (!prev) return null;
+            const match = validTargets.find(t => (t.target_id || t.id) === (prev.target_id || prev.id));
+            return match || null;
+          });
+        }
       } else {
         setSelectedItem(null);
       }
@@ -245,20 +252,10 @@ export default function Detections() {
       return d;
     }));
 
+    // Dismiss / remove the detail panel when review action takes place
     setSelectedItem(prev => {
-      if (!prev) return null;
-      if (prev.target_id === targetId || prev.id === targetId) {
-        const updatedObs = (prev.observations || []).map(o => ({
-          ...o,
-          status: newStatus,
-          human_review_status: newStatus
-        }));
-        return {
-          ...prev,
-          status: newStatus,
-          human_review_status: newStatus,
-          observations: updatedObs
-        };
+      if (prev && (prev.target_id === targetId || prev.id === targetId)) {
+        return null;
       }
       return prev;
     });
@@ -270,38 +267,6 @@ export default function Detections() {
       console.error('Review action failed:', err);
       // Refresh on network error
       fetchData();
-    }
-  };
-
-  // Clear all detections
-  const handleClearAllDetections = async () => {
-    try {
-      setActionLoading(true);
-      await detectionService.clearAll();
-      setShowClearModal(false);
-      setTargets([]);
-      setDetections([]);
-      setSelectedItem(null);
-    } catch (err) {
-      console.error('Clear failed:', err);
-      alert('Error clearing detections: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Reset to default demo data
-  const handleResetDemoData = async () => {
-    try {
-      setActionLoading(true);
-      await detectionService.resetToDefaults();
-      setShowClearModal(false);
-      await fetchData();
-    } catch (err) {
-      console.error('Reset failed:', err);
-      alert('Error resetting demo data: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setActionLoading(false);
     }
   };
 
@@ -435,25 +400,6 @@ export default function Detections() {
               <LayoutGrid className="w-3.5 h-3.5" /> Cards View
             </button>
           </div>
-
-          {/* Remove All Detections Button */}
-          <button
-            onClick={() => setShowClearModal(true)}
-            className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-2xs"
-            title="Remove all detected objects"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear All
-          </button>
-
-          {/* Quick Refresh */}
-          <button
-            onClick={fetchData}
-            title="Refresh from backend"
-            className="p-2 bg-[#F4F7FB] hover:bg-slate-100 text-[#475569] hover:text-[#0B192C] rounded-xl border border-[#E2E8F0] transition shadow-2xs"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#0284C7]' : ''}`} />
-          </button>
         </div>
       </div>
 
@@ -599,15 +545,8 @@ export default function Detections() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <span className="font-bold text-[#0B192C] block text-sm">No matching targets in repository</span>
-                  <span className="text-xs text-[#64748B] block">Database is empty or all targets filtered out.</span>
-                  <button
-                    onClick={handleResetDemoData}
-                    className="mt-2 px-4 py-2 bg-[#EAF2FD] hover:bg-blue-100 text-[#0284C7] font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 border border-[#BAE6FD]"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Restore Demo Data
-                  </button>
+                  <span className="font-bold text-[#0B192C] block text-sm">No targets in database</span>
+                  <span className="text-xs text-[#64748B] block">Awaiting original sonar detection ingestion via API (POST /api/detections).</span>
                 </div>
               )}
             </div>
@@ -646,7 +585,10 @@ export default function Detections() {
                       return (
                         <tr
                           key={targetId}
-                          onClick={() => setSelectedItem(tgt)}
+                          onClick={() => {
+                            setSelectedItem(tgt);
+                            setSelectedTargetId(targetId);
+                          }}
                           className={`cursor-pointer transition select-none ${
                             isSelected 
                               ? 'bg-[#EAF2FD] text-[#0B192C] border-l-4 border-l-[#0284C7]' 
@@ -660,7 +602,16 @@ export default function Detections() {
                             )}
                           </td>
                           <td className="p-3.5">
-                            <div className="w-10 h-10 rounded-lg bg-black border border-[#E2E8F0] overflow-hidden flex items-center justify-center">
+                            <div 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedItem(tgt);
+                                setSelectedTargetId(targetId);
+                                setIsEvidenceModalOpen(true);
+                              }}
+                              className="w-10 h-10 rounded-lg bg-black border border-[#E2E8F0] overflow-hidden flex items-center justify-center hover:scale-110 transition-transform cursor-pointer shadow-2xs"
+                              title="Click to open Full Sonar Evidence Viewer"
+                            >
                               {imageSrc ? (
                                 <img
                                   src={imageSrc}
@@ -755,8 +706,12 @@ export default function Detections() {
                 return (
                   <div
                     key={targetId}
-                    onClick={() => setSelectedItem(tgt)}
-                    className={`bg-white rounded-2xl p-4 border transition cursor-pointer shadow-2xs relative space-y-3 ${
+                    onClick={() => {
+                      // Clicking the card or object name opens the side inspection panel
+                      setSelectedItem(tgt);
+                      setSelectedTargetId(targetId);
+                    }}
+                    className={`bg-white rounded-2xl p-4 border transition cursor-pointer shadow-2xs relative space-y-3 hover:shadow-md ${
                       isSelected ? 'border-2 border-[#0284C7] ring-2 ring-[#BAE6FD]' : 'border-[#E5EDF5] hover:border-[#CBD5E1]'
                     }`}
                   >
@@ -767,13 +722,28 @@ export default function Detections() {
                       </span>
                     </div>
 
-                    <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-[#E2E8F0] flex items-center justify-center">
+                    {/* MINI IMAGE: Clicking mini image opens the extended modal */}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedItem(tgt);
+                        setSelectedTargetId(targetId);
+                        setIsEvidenceModalOpen(true);
+                      }}
+                      className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-[#E2E8F0] flex items-center justify-center relative group hover:border-indigo-400 transition"
+                      title="Click mini image to enlarge"
+                    >
                       {imageSrc ? (
-                        <img src={imageSrc} alt={targetId} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                        <img src={imageSrc} alt={targetId} className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                       ) : (
                         <div className="text-center p-3 text-[#94A3B8] space-y-1">
                           <Layers className="w-6 h-6 mx-auto text-slate-500" />
                           <span className="text-[10px] font-mono block font-bold">NO EVIDENCE IMAGE</span>
+                        </div>
+                      )}
+                      {imageSrc && (
+                        <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur text-white text-[9px] font-mono font-bold opacity-0 group-hover:opacity-100 transition">
+                          Enlarge &rarr;
                         </div>
                       )}
                     </div>
@@ -795,27 +765,16 @@ export default function Detections() {
         {/* Selected Target Inspection Drawer / Right Column */}
         {selectedItem && (
           <div className="lg:col-span-4">
-            <div className="sticky top-24 space-y-2">
-              <div className="bg-white p-3 rounded-2xl border border-[#E5EDF5] shadow-2xs flex items-center justify-between">
-                <span className="text-[10px] font-bold text-[#64748B] font-mono uppercase">
-                  TARGET INSPECTION
-                </span>
-                <button
-                  onClick={() => {
-                    setSelectedTargetId(selectedItem.target_id || selectedItem.id);
-                    navigate('/map');
-                  }}
-                  className="px-2.5 py-1 bg-[#EAF2FD] hover:bg-blue-100 text-[#0284C7] font-bold text-xs rounded-lg transition flex items-center gap-1 border border-[#BAE6FD]"
-                  title="Center & Inspect on GIS Map"
-                >
-                  <MapPin className="w-3.5 h-3.5" /> View on Map &rarr;
-                </button>
-              </div>
-
+            <div className="sticky top-24">
               <DetectionDetailPanel
                 detection={selectedItem}
                 onClose={() => setSelectedItem(null)}
                 onReview={(tid, act) => handleReviewAction(tid, act)}
+                onOpenEvidence={() => setIsEvidenceModalOpen(true)}
+                onViewOnMap={() => {
+                  setSelectedTargetId(selectedItem.target_id || selectedItem.id);
+                  navigate('/map');
+                }}
               />
             </div>
           </div>
@@ -823,51 +782,26 @@ export default function Detections() {
 
       </div>
 
-      {/* Confirmation Modal for Clearing Objects */}
-      {showClearModal && (
-        <div className="fixed inset-0 bg-[#0B192C]/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-[#E5EDF5] space-y-4 animate-arrival">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-100">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-[#0B192C]">Manage Detected Objects</h3>
-                <p className="text-xs text-[#64748B]">Choose whether to purge all current detections or restore defaults.</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-[#475569] bg-[#F4F7FB] p-3 rounded-xl border border-[#E2E8F0]">
-              Removing all objects will clear the active detection list, GIS markers, and target inspection database across all connected dashboard terminals.
-            </p>
-
-            <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowClearModal(false)}
-                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-[#475569] hover:bg-slate-100 rounded-xl transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleResetDemoData}
-                disabled={actionLoading}
-                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-[#0284C7] bg-[#EAF2FD] hover:bg-blue-100 border border-[#BAE6FD] rounded-xl transition flex items-center justify-center gap-1.5"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset Demo Data
-              </button>
-              <button
-                onClick={handleClearAllDetections}
-                disabled={actionLoading}
-                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition shadow-sm flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                {actionLoading ? "Clearing..." : "Purge All Objects"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Full Sonar Evidence Viewer Modal */}
+      {isEvidenceModalOpen && selectedItem && (
+        <EvidenceViewerModal
+          target={selectedItem}
+          allTargets={targets}
+          onClose={() => setIsEvidenceModalOpen(false)}
+          onTargetSelect={(t) => {
+            setSelectedItem(t);
+            setSelectedTargetId(t.target_id || t.id);
+          }}
+          onTargetReviewed={(tid, newStatus) => {
+            setTargets(prev => prev.map(t => (t.target_id === tid || t.id === tid) ? { ...t, status: newStatus, human_review_status: newStatus } : t));
+            if (selectedItem && (selectedItem.target_id === tid || selectedItem.id === tid)) {
+              setSelectedItem(prev => ({ ...prev, status: newStatus, human_review_status: newStatus }));
+            }
+          }}
+        />
       )}
+
+
 
     </div>
   );

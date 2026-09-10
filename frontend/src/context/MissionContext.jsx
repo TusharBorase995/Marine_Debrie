@@ -98,11 +98,23 @@ export const MissionProvider = ({ children }) => {
     fetchMissions();
   }, []);
 
-  // Save selected mission preference
-  const changeSelectedMission = (id) => {
+  // Save selected mission preference & sync active mission in PostgreSQL backend
+  const changeSelectedMission = async (id) => {
     setSelectedMissionId(id);
-    if (id) {
+    if (id && id !== 'ALL') {
       localStorage.setItem('sonar_active_mission_id', id);
+      try {
+        await missionService.setActive(id);
+      } catch (err) {
+        console.warn('Failed to sync active mission with server:', err);
+      }
+    } else {
+      localStorage.setItem('sonar_active_mission_id', 'ALL');
+      try {
+        await missionService.deactivate();
+      } catch (err) {
+        console.warn('Failed to deactivate active mission on server:', err);
+      }
     }
   };
 
@@ -110,7 +122,15 @@ export const MissionProvider = ({ children }) => {
   useEffect(() => {
     if (!wsData) return;
 
-    if (
+    if (wsData.type === 'MISSION_ACTIVATED' && wsData.data?.mission_id) {
+      setSelectedMissionId(wsData.data.mission_id);
+      localStorage.setItem('sonar_active_mission_id', wsData.data.mission_id);
+      fetchMissions();
+    } else if (wsData.type === 'MISSION_DEACTIVATED') {
+      setSelectedMissionId('ALL');
+      localStorage.setItem('sonar_active_mission_id', 'ALL');
+      fetchMissions();
+    } else if (
       wsData.type === 'MISSION_IMPORTED' || 
       wsData.type === 'MISSION_DELETED' || 
       wsData.type === 'DETECTIONS_RESET'

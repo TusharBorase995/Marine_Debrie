@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -26,6 +26,7 @@ class CanonicalDetectionInput(BaseModel):
     timestamp: Optional[str] = None
     sonar_image_ref: Optional[str] = None
     bounding_box: Optional[Dict[str, Any]] = None
+    segmentation: Optional[List[List[Union[float, int]]]] = None
     mask_ref: Optional[str] = None
     mission_id: Optional[str] = "MISSION-LIVE"
 
@@ -126,16 +127,6 @@ async def create_detection(request: Request):
         except Exception:
             body = {}
 
-    # Support batch list if sent directly to /api/detections
-    if isinstance(body, list) or "detections" in body:
-        from app.api.ml_integration import ingest_batch_detections
-        return await ingest_batch_detections(body)
-
-    if not isinstance(body, dict) or not body:
-        raise HTTPException(status_code=400, detail="Missing detection payload. Send 'detection' JSON or form fields.")
-
-    target_id_raw = body.get("target_id") or f"TGT-{db_mock.next_tgt_id:03d}"
-    safe_tid = str(target_id_raw).replace("/", "_").replace("\\", "_")
     image_url = None
     image_id = None
 
@@ -143,7 +134,13 @@ async def create_detection(request: Request):
     if uploaded_image_file and hasattr(uploaded_image_file, "read"):
         img_bytes = await uploaded_image_file.read()
         if len(img_bytes) > 0:
-            orig_name = uploaded_image_file.filename or f"{safe_tid}.png"
+            target_id_raw = body.get("target_id") or (
+                body.get("detections", [{}])[0].get("target_id")
+                if isinstance(body, dict) and body.get("detections")
+                else f"TGT-{db_mock.next_tgt_id:03d}"
+            )
+            safe_tid = str(target_id_raw).replace("/", "_").replace("\\", "_")
+            orig_name = getattr(uploaded_image_file, "filename", None) or f"{safe_tid}.png"
             ext = os.path.splitext(orig_name)[1].lower()
             if ext not in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"]:
                 ext = ".png"
@@ -164,34 +161,25 @@ async def create_detection(request: Request):
             except Exception as e:
                 print(f"[DB] Image save warning: {e}")
 
-            body["sonar_image_ref"] = image_url
-            body["image_id"] = image_id
+            if isinstance(body, dict):
+                body["sonar_image_ref"] = image_url
+                body["image_id"] = image_id
 
-    mission_id = body.get("mission_id") or "MISSION-LIVE"
+    # Support batch list or combined frame detections if sent directly to /api/detections
+    if isinstance(body, list) or (isinstance(body, dict) and "detections" in body):
+        from app.api.ml_integration import ingest_batch_detections
+        return await ingest_batch_detections(body)
+
+    if not isinstance(body, dict) or not body:
+        raise HTTPException(status_code=400, detail="Missing detection payload. Send 'detection' JSON or form fields.")
+
+    # Route detection to active mission or serial-wise created mission
+    mission_id = repo.resolve_target_mission(body.get("mission_id"), ingestion_mode="live")
     canonical = normalize_detection_item(body, mission_id=mission_id)
     if image_url:
         canonical["sonar_image_ref"] = image_url
     if image_id:
         canonical["image_id"] = image_id
-
-    # Ensure mission exists in repository & DB
-    if not any(m["mission_id"] == mission_id for m in db_mock.missions):
-        new_mission = {
-            "mission_id": mission_id,
-            "survey_name": f"Mission {mission_id} — Live Stream",
-            "ingestion_mode": "live",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "detection_count": 0,
-            "status": "in_progress"
-        }
-        try:
-            repo.create_or_update_mission(new_mission)
-            db_mock.missions.insert(0, new_mission)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Database Offline: Cannot create mission in PostgreSQL. Please start the PostgreSQL service ('sonar_db'). Error: {e}"
-            )
 
     # Persist in PostgreSQL database (mandatory)
     try:
@@ -274,28 +262,18 @@ async def review_detection(detection_id: str, review_in: ReviewPayload):
 
     return updated
 
-@router.delete("", status_code=status.HTTP_200_OK)
-@router.delete("/all", status_code=status.HTTP_200_OK)
-@router.post("/clear", status_code=status.HTTP_200_OK)
+@router.delete("", status_code=status.HTTP_403_FORBIDDEN)
+@router.delete("/all", status_code=status.HTTP_403_FORBIDDEN)
+@router.post("/clear", status_code=status.HTTP_403_FORBIDDEN)
 async def clear_all_detections():
     """
-    DELETE /api/detections or POST /api/detections/clear
-    Purges all detected objects and targets permanently from PostgreSQL database.
-    Broadcasts 'ALL_DETECTIONS_CLEARED' event to all connected dashboards via WebSocket.
+    Bulk database clear has been disabled.
+    Hydrographic survey data and user detections are strictly persisted in PostgreSQL.
     """
-    try:
-        res = repo.clear_all()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database Offline: Cannot purge database in PostgreSQL: {e}"
-        )
-
-    await ws_manager.broadcast({
-        "type": "ALL_DETECTIONS_CLEARED",
-        "data": {}
-    })
-    return res
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Bulk deletion/purge is disabled. Hydrographic survey targets and detections are strictly preserved in PostgreSQL."
+    )
 
 @router.delete("/{detection_id}", status_code=status.HTTP_200_OK)
 async def delete_single_detection(detection_id: str):

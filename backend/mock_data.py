@@ -88,13 +88,6 @@ class DataRepository:
         from app.db.repository import repo
         return repo.create_or_update_mission(mission_dict)
 
-    def clear_all_detections(self) -> Dict[str, Any]:
-        from app.db.repository import repo
-        return repo.clear_all()
-
-    def reset_to_defaults(self) -> Dict[str, Any]:
-        return self.clear_all_detections()
-
     def get_consolidated_targets(
         self, 
         cls: Optional[str] = None, 
@@ -110,8 +103,8 @@ class DataRepository:
         if dets:
             latest = dets[0]
             return {
-                "latitude": latest.get("latitude", self.base_lat),
-                "longitude": latest.get("longitude", self.base_lon),
+                "latitude": latest.get("latitude"),
+                "longitude": latest.get("longitude"),
                 "timestamp": latest.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                 "heading": 0.0,
                 "speed_knots": 0.0,

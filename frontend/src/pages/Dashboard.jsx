@@ -717,6 +717,7 @@ export default function Dashboard() {
               newlyDetectedTargetId={newlyDetectedId}
               onSelectTarget={handleSelectTarget}
               compact={true}
+              autoZoomKey={selectedMissionId || 'ALL'}
             />
           </div>
 

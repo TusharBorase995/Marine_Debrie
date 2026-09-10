@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Map as MapIcon, Compass, RefreshCw, Disc } from 'lucide-react';
 import GISMap from '../components/GISMap';
-import DetectionDetailPanel from '../components/DetectionDetailPanel';
+import EvidenceViewerModal from '../components/EvidenceViewerModal';
 import targetService from '../services/targetService';
 import mapService from '../services/mapService';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -23,6 +23,7 @@ export default function MapPage() {
   const [vesselTrack, setVesselTrack] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTarget, setSelectedTarget] = useState(null);
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const [newlyDetectedId, setNewlyDetectedId] = useState(null);
 
   // Filters
@@ -145,6 +146,14 @@ export default function MapPage() {
       setSelectedTargetId(tgt.target_id || tgt.id);
     } else {
       setSelectedTargetId(null);
+    }
+  };
+
+  const handleOpenEvidence = (tgt) => {
+    setSelectedTarget(tgt);
+    if (tgt) {
+      setSelectedTargetId(tgt.target_id || tgt.id);
+      setIsEvidenceOpen(true);
     }
   };
 
@@ -271,7 +280,7 @@ export default function MapPage() {
         </div>
       </div>
 
-      {/* Main Container: Map (Left) and Detail Drawer (Right if target selected) */}
+      {/* Main Container: Full Width Map */}
       <div className="flex-1 flex relative overflow-hidden rounded-2xl border border-slate-200 shadow-sm bg-white">
         <div className="flex-1 h-full">
           <GISMap
@@ -280,33 +289,28 @@ export default function MapPage() {
             selectedTargetId={selectedTarget?.target_id || selectedTarget?.id}
             newlyDetectedTargetId={newlyDetectedId}
             onSelectTarget={handleTargetSelect}
+            onOpenEvidence={handleOpenEvidence}
+            autoZoomKey={selectedMissionId || 'ALL'}
           />
         </div>
 
-        {/* Floating Detail Drawer Panel */}
-        {selectedTarget && (
-          <div className="w-96 bg-white border-l border-slate-200 h-full overflow-y-auto z-[1000] p-4 shadow-xl animate-arrival">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
-                SPATIAL INSPECTION
-              </span>
-              <button
-                onClick={() => {
-                  setSelectedTargetId(selectedTarget.target_id || selectedTarget.id);
-                  navigate('/detections');
-                }}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1"
-                title="Open in Detection Catalog"
-              >
-                <Disc className="w-3 h-3" /> Target Review &rarr;
-              </button>
-            </div>
-            <DetectionDetailPanel
-              detection={selectedTarget}
-              onClose={() => handleTargetSelect(null)}
-              onReview={(id, action) => handleReview(id, action)}
-            />
-          </div>
+        {/* Full Sonar Evidence Viewer Modal with Multi-Target Segmentation & Bounding Boxes */}
+        {isEvidenceOpen && selectedTarget && (
+          <EvidenceViewerModal
+            target={selectedTarget}
+            allTargets={filteredTargets}
+            onClose={() => {
+              setIsEvidenceOpen(false);
+              setSelectedTarget(null);
+            }}
+            onTargetSelect={(t) => {
+              setSelectedTarget(t);
+              setSelectedTargetId(t.target_id || t.id);
+            }}
+            onTargetReviewed={(tid, newStatus) => {
+              handleReview(tid, newStatus);
+            }}
+          />
         )}
       </div>
     </div>

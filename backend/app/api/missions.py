@@ -23,22 +23,20 @@ class MissionCreatePayload(BaseModel):
     created_at: Optional[str] = None
     status: Optional[str] = "in_progress"
 
-def normalize_detection_item(item: dict, mission_id: str) -> dict:
-    """Normalizes raw input detection into the canonical detection model."""
+def normalize_detection_item(item: dict, mission_id: str, default_image_ref: Optional[str] = None) -> dict:
+    """Normalizes arbitrary raw detection dictionary into canonical Detection schema."""
     target_id = item.get("target_id") or f"TGT-{db_mock.next_tgt_id:03d}"
-    cls = item.get("class") or item.get("class_name") or item.get("category") or "debris_net"
-    
+    cls = item.get("class") or item.get("category") or "debris_net"
     try:
         conf = float(item.get("confidence", 0.85))
-        conf = max(0.0, min(1.0, conf))
     except (ValueError, TypeError):
         conf = 0.85
 
-    try:
-        lat = float(item.get("latitude", 32.6500))
-        lon = float(item.get("longitude", -117.5500))
-    except (ValueError, TypeError):
-        lat, lon = 32.6500, -117.5500
+    raw_lat = item.get("latitude")
+    lat = float(raw_lat) if raw_lat is not None else None
+
+    raw_lon = item.get("longitude")
+    lon = float(raw_lon) if raw_lon is not None else None
 
     try:
         size = float(item.get("estimated_size_m", 3.0))
@@ -53,7 +51,7 @@ def normalize_detection_item(item: dict, mission_id: str) -> dict:
     else:
         stat = "pending_review"
 
-    raw_img = item.get("sonar_image_ref")
+    raw_img = item.get("sonar_image_ref") or default_image_ref
     evidence_img = image_service.resolve_image_ref(raw_img, target_id=target_id, target_class=cls)
 
     ts = item.get("timestamp") or datetime.now(timezone.utc).isoformat()
@@ -90,7 +88,8 @@ def normalize_detection_item(item: dict, mission_id: str) -> dict:
         "human_review_status": stat,
         "timestamp": ts,
         "sonar_image_ref": evidence_img,
-        "bounding_box": item.get("bounding_box") or {"x": 160, "y": 140, "width": 260, "height": 200},
+        "bounding_box": item.get("bounding_box"),
+        "segmentation": item.get("segmentation"),
         "mask_ref": item.get("mask_ref"),
         "mission_id": mission_id,
         "pass_number": item.get("pass_number", 1),
@@ -119,6 +118,12 @@ def consolidate_target_record(canonical: dict):
         existing_tgt["latitude"] = round(sum(d["latitude"] for d in existing_tgt["observations"]) / len(existing_tgt["observations"]), 6)
         existing_tgt["longitude"] = round(sum(d["longitude"] for d in existing_tgt["observations"]) / len(existing_tgt["observations"]), 6)
         existing_tgt["sonar_image_ref"] = canonical["sonar_image_ref"]
+        if canonical.get("bounding_box"):
+            existing_tgt["bounding_box"] = canonical["bounding_box"]
+        if canonical.get("segmentation"):
+            existing_tgt["segmentation"] = canonical["segmentation"]
+        if canonical.get("mask_ref"):
+            existing_tgt["mask_ref"] = canonical["mask_ref"]
     else:
         new_tgt = {
             "target_id": target_id,
@@ -135,6 +140,9 @@ def consolidate_target_record(canonical: dict):
             "fused_confidence": canonical["confidence"],
             "observation_count": 1,
             "sonar_image_ref": canonical["sonar_image_ref"],
+            "bounding_box": canonical.get("bounding_box"),
+            "segmentation": canonical.get("segmentation"),
+            "mask_ref": canonical.get("mask_ref"),
             "mission_id": canonical["mission_id"],
             "observations": [canonical]
         }
@@ -152,19 +160,63 @@ def get_missions():
             detail=f"Database Offline: Cannot load missions from PostgreSQL: {e}"
         )
 
+@router.get("/active")
+def get_active_mission():
+    """GET /api/missions/active — Returns the currently active survey mission from PostgreSQL."""
+    from app.db.repository import repo
+    try:
+        active = repo.get_active_mission()
+        return {"active_mission": active}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database Offline: Cannot read active mission from PostgreSQL: {e}"
+        )
+
+@router.post("/deactivate")
+async def deactivate_missions():
+    """POST /api/missions/deactivate — Clears active mission selection."""
+    from app.db.repository import repo
+    try:
+        repo.deactivate_all_missions()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
+    await ws_manager.broadcast({
+        "type": "MISSION_DEACTIVATED",
+        "data": {}
+    })
+    return {"success": True, "message": "All missions deactivated"}
+
+@router.post("/{mission_id}/active")
+async def set_active_mission(mission_id: str):
+    """POST /api/missions/{mission_id}/active — Sets the specified mission as active in PostgreSQL."""
+    from app.db.repository import repo
+    try:
+        updated = repo.set_active_mission(mission_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Mission '{mission_id}' not found")
+    await ws_manager.broadcast({
+        "type": "MISSION_ACTIVATED",
+        "data": {"mission_id": mission_id, "mission": updated}
+    })
+    return {"success": True, "active_mission": updated}
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_mission(payload: MissionCreatePayload):
     """POST /api/missions — Register a new mission record directly in PostgreSQL."""
     from app.db.repository import repo
-    m_id = payload.mission_id or f"MISSION-{int(datetime.now().timestamp())}"
+    m_id = payload.mission_id or repo.generate_next_mission_id()
     mission_record = {
         "mission_id": m_id,
-        "survey_name": payload.survey_name,
+        "survey_name": payload.survey_name or f"Survey Mission {m_id.split('-')[-1]}",
         "description": payload.description or "Acoustic side-scan sonar hydrographic survey",
         "ingestion_mode": payload.ingestion_mode,
         "created_at": payload.created_at or datetime.now(timezone.utc).isoformat(),
         "detection_count": 0,
-        "status": payload.status or ("in_progress" if payload.ingestion_mode == "live" else "completed")
+        "status": payload.status or ("in_progress" if payload.ingestion_mode == "live" else "completed"),
+        "is_active": True
     }
     try:
         created = repo.create_or_update_mission(mission_record)
@@ -252,6 +304,8 @@ async def import_mission_batch(
     created_at = datetime.now(timezone.utc).isoformat()
     raw_detections: List[dict] = []
 
+    top_image_ref = None
+
     if file:
         content = await file.read()
         filename_lower = file.filename.lower()
@@ -283,6 +337,7 @@ async def import_mission_batch(
                         survey_name = parsed_json.get("survey_name", survey_name)
                         created_at = parsed_json.get("created_at", created_at)
                         raw_detections = parsed_json.get("detections", [])
+                        top_image_ref = parsed_json.get("sonar_image_ref")
                     elif isinstance(parsed_json, list):
                         raw_detections = parsed_json
 
@@ -296,6 +351,7 @@ async def import_mission_batch(
                     survey_name = parsed_json.get("survey_name", survey_name)
                     created_at = parsed_json.get("created_at", created_at)
                     raw_detections = parsed_json.get("detections", [])
+                    top_image_ref = parsed_json.get("sonar_image_ref")
                 elif isinstance(parsed_json, list):
                     raw_detections = parsed_json
             except Exception as e:
@@ -311,6 +367,7 @@ async def import_mission_batch(
                 survey_name = body.get("survey_name", survey_name)
                 created_at = body.get("created_at", created_at)
                 raw_detections = body.get("detections", [])
+                top_image_ref = body.get("sonar_image_ref")
             elif isinstance(body, list):
                 raw_detections = body
         except Exception:
@@ -324,7 +381,7 @@ async def import_mission_batch(
     try:
         from app.db.repository import repo
         for item in raw_detections:
-            canonical = normalize_detection_item(item, mission_id)
+            canonical = normalize_detection_item(item, mission_id, default_image_ref=top_image_ref)
             repo.insert_detection(canonical)
             db_mock.detections.insert(0, canonical)
             consolidate_target_record(canonical)
@@ -456,9 +513,54 @@ def export_mission(
                 detail=f"Failed to generate Excel report: {str(e)}"
             )
 
+    elif fmt == "json":
+        import json
+        payload = {
+            "mission": mission,
+            "targets": targets,
+            "detections": detections,
+            "analysis": analysis
+        }
+        filename = f"{clean_mission_name}_Operational_Report.json"
+        return Response(
+            content=json.dumps(payload, indent=2, default=str),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+
+    elif fmt == "csv":
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Target ID", "Class", "Confidence", "Latitude", "Longitude", "Size (m)", "Status", "Sonar Image Ref"])
+        for det in detections:
+            writer.writerow([
+                det.get("target_id") or det.get("id", ""),
+                det.get("class") or det.get("category", ""),
+                det.get("confidence", ""),
+                det.get("latitude", ""),
+                det.get("longitude", ""),
+                det.get("estimated_size_m", ""),
+                det.get("status", ""),
+                det.get("sonar_image_ref", "")
+            ])
+        filename = f"{clean_mission_name}_Operational_Report.csv"
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid export format '{format}'. Supported formats are 'pdf' and 'excel'."
+            detail=f"Invalid export format '{format}'. Supported formats are 'pdf', 'excel', 'csv', and 'json'."
         )
 

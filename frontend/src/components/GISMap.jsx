@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Maximize2, ExternalLink, Layers, Check } from 'lucide-react';
+import { Maximize2, ExternalLink, Layers, Check, Sparkles, Plus, Minus } from 'lucide-react';
 import { consolidateDetectionsToTargets } from '../services/targetService';
 import { MAP_CONFIG } from '../config/mapConfig';
 import { formatConfidence, formatClassLabel, formatSize } from '../utils/formatters';
@@ -88,52 +88,81 @@ const createPhysicalTargetIcon = (status, isSelected, isNewlyDetected = false, o
 
 /**
  * Controller subcomponent inside MapContainer:
- * 1. Auto-fits viewport to operational survey bounds on first load.
- * 2. Smoothly flies to selected target when user clicks card or table row.
+ * 1. Synchronizes map instance reference and zoom state events.
+ * 2. Initial auto-zoom: Automatically fits/zooms to detected objects ONCE when placed on the map.
+ * 3. Preserves complete user freedom to zoom in/out freely at any time without snap-back.
+ * 4. Smoothly pans to selected target when user clicks a marker without changing user's zoom level.
  */
 function SurveyViewportController({
-  physicalTargets,
+  targets = [],
   selectedTarget,
   onZoomChange,
-  onMapReady
+  onMapReady,
+  autoZoomKey = null,
+  autoZoomInitially = true
 }) {
   const map = useMap();
-  const hasAutoFitted = useRef(false);
+  const lastCenteredIdRef = useRef(null);
+  const hasAutoZoomedRef = useRef(false);
+  const prevKeyRef = useRef(autoZoomKey);
 
   useEffect(() => {
     if (onMapReady) onMapReady(map);
   }, [map, onMapReady]);
 
   useMapEvents({
-    zoomend: () => onZoomChange(map.getZoom()),
+    zoomend: () => onZoomChange?.(map.getZoom()),
   });
 
-  // Auto-Fit to Detected Targets
+  // Reset initial auto-zoom flag if the mission/layer scope changes
   useEffect(() => {
-    if (!map) return;
-    const points = [];
-    if (physicalTargets && physicalTargets.length > 0) {
-      physicalTargets.forEach(t => points.push([t.latitude, t.longitude]));
+    if (prevKeyRef.current !== autoZoomKey) {
+      prevKeyRef.current = autoZoomKey;
+      hasAutoZoomedRef.current = false;
     }
-    if (points.length === 0) return;
+  }, [autoZoomKey]);
 
-    if (!hasAutoFitted.current) {
-      const bounds = L.latLngBounds(points);
-      map.fitBounds(bounds, {
-        padding: [45, 45],
-        maxZoom: 14.5
+  // Initial auto-zoom: ONLY triggers once when detected objects are initially placed on the map
+  useEffect(() => {
+    if (!map || !autoZoomInitially || hasAutoZoomedRef.current) return;
+
+    const validPoints = [];
+    if (targets && targets.length > 0) {
+      targets.forEach(t => {
+        if (t.latitude != null && t.longitude != null && !isNaN(t.latitude) && !isNaN(t.longitude)) {
+          validPoints.push([Number(t.latitude), Number(t.longitude)]);
+        }
       });
-      hasAutoFitted.current = true;
     }
-  }, [map, physicalTargets]);
 
-  // Synchronized Target Centering: Fly smoothly to selected target
+    if (validPoints.length > 0) {
+      hasAutoZoomedRef.current = true;
+      if (validPoints.length === 1) {
+        // Single target: center and set comfortable zoom level (15)
+        map.setView(validPoints[0], 15, { animate: true });
+      } else {
+        // Multiple targets: fit bounds with padding
+        const bounds = L.latLngBounds(validPoints);
+        map.fitBounds(bounds, {
+          padding: [50, 50],
+          maxZoom: 16,
+          animate: true
+        });
+      }
+    }
+  }, [map, targets, autoZoomInitially]);
+
+  // Smoothly center onto selected target WITHOUT altering or restricting user's chosen zoom level
   useEffect(() => {
     if (!map || !selectedTarget) return;
-    if (selectedTarget.latitude && selectedTarget.longitude) {
-      map.flyTo([selectedTarget.latitude, selectedTarget.longitude], 14.5, {
-        duration: 0.8,
-        easeLinearity: 0.25
+    const targetId = selectedTarget.target_id || selectedTarget.id;
+    if (lastCenteredIdRef.current === targetId) return;
+    lastCenteredIdRef.current = targetId;
+
+    if (selectedTarget.latitude != null && selectedTarget.longitude != null) {
+      map.panTo([selectedTarget.latitude, selectedTarget.longitude], {
+        animate: true,
+        duration: 0.5
       });
     }
   }, [map, selectedTarget]);
@@ -145,18 +174,21 @@ export const GISMap = ({
   targets = null,
   detections = [], 
   vesselTrack = [], 
-  center = MAP_CONFIG.defaultCenter, 
-  zoom = MAP_CONFIG.defaultZoom,
+  center = null, 
+  zoom = null,
   selectedTargetId = null,
   selectedDetectionId = null,
   newlyDetectedTargetId = null,
   onSelectTarget = null,
   onSelectDetection = null,
+  onOpenEvidence = null,
+  autoZoomKey = null,
+  autoZoomInitially = true,
   className = "",
   compact = false
 }) => {
-  const [currentZoom, setCurrentZoom] = useState(zoom);
   const [mapInstance, setMapInstance] = useState(null);
+  const [currentZoom, setCurrentZoom] = useState(() => zoom || MAP_CONFIG.defaultZoom || 13);
   const [selectedBasemapId, setSelectedBasemapId] = useState(() => MAP_CONFIG.basemaps?.[0]?.id || 'osm');
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const layerMenuRef = useRef(null);
@@ -197,15 +229,37 @@ export const GISMap = ({
     );
   }, [physicalTargets, activeSelectedId]);
 
-  // Operational Target Area Bounds for Fit-to-Bounds
+  // Operational Target Area Bounds for Fit-to-Bounds (Manual on-demand action only)
   const targetAreaBounds = useMemo(() => {
     const points = [];
     if (physicalTargets && physicalTargets.length > 0) {
-      physicalTargets.forEach(t => points.push([t.latitude, t.longitude]));
+      physicalTargets.forEach(t => {
+        if (t.latitude != null && t.longitude != null) {
+          points.push([t.latitude, t.longitude]);
+        }
+      });
     }
     if (points.length === 0) return null;
     return L.latLngBounds(points);
   }, [physicalTargets]);
+
+  // Calculate default center without forcing strict zoom
+  const initialCenter = useMemo(() => {
+    if (center) return center;
+    if (physicalTargets && physicalTargets.length > 0) {
+      const validLats = physicalTargets.filter(t => t.latitude != null).map(t => t.latitude);
+      const validLons = physicalTargets.filter(t => t.longitude != null).map(t => t.longitude);
+      if (validLats.length > 0 && validLons.length > 0) {
+        return [
+          validLats.reduce((a, b) => a + b, 0) / validLats.length,
+          validLons.reduce((a, b) => a + b, 0) / validLons.length
+        ];
+      }
+    }
+    return MAP_CONFIG.defaultCenter;
+  }, [center, physicalTargets]);
+
+  const initialZoom = zoom || MAP_CONFIG.defaultZoom || 13;
 
   const handleMarkerClick = (tgt) => {
     if (onSelectTarget) onSelectTarget(tgt);
@@ -215,8 +269,8 @@ export const GISMap = ({
   const handleFitSurveyArea = () => {
     if (mapInstance && targetAreaBounds) {
       mapInstance.fitBounds(targetAreaBounds, {
-        padding: [45, 45],
-        maxZoom: 14.5
+        padding: [50, 50],
+        maxZoom: 16
       });
     }
   };
@@ -226,25 +280,31 @@ export const GISMap = ({
       <style>{sonarRadarStyles}</style>
       
       <MapContainer 
-        center={center} 
-        zoom={zoom} 
+        center={initialCenter} 
+        zoom={initialZoom}
+        minZoom={MAP_CONFIG.minZoom || 2}
+        maxZoom={MAP_CONFIG.maxZoom || 19}
         scrollWheelZoom={true} 
+        doubleClickZoom={true}
+        zoomControl={false}
         style={{ width: '100%', height: '100%', background: '#050914' }}
       >
         <SurveyViewportController 
-          physicalTargets={physicalTargets}
+          targets={physicalTargets}
           selectedTarget={selectedTargetObj}
           onZoomChange={setCurrentZoom} 
           onMapReady={setMapInstance} 
+          autoZoomKey={autoZoomKey}
+          autoZoomInitially={autoZoomInitially}
         />
 
-        {/* 1. Dynamic High-Resolution Basemap Layer (100% full coverage for India & Indian Ocean) */}
+        {/* 1. Dynamic High-Resolution Basemap Layer */}
         <TileLayer
           key={activeBasemap.id || activeBasemap.name}
           attribution={activeBasemap.attribution}
           url={activeBasemap.url}
           maxZoom={activeBasemap.maxZoom || 19}
-          maxNativeZoom={activeBasemap.maxNativeZoom || 12}
+          maxNativeZoom={activeBasemap.maxNativeZoom || 18}
         />
 
         {/* 2. STRICTLY ONE PHYSICAL TARGET = ONE GIS MARKER (No clustering hiding targets) */}
@@ -274,7 +334,7 @@ export const GISMap = ({
                 click: () => handleMarkerClick(tgt)
               }}
             >
-              <Popup className="maritime-popup" autoPan={true}>
+              <Popup className="maritime-popup" autoPan={false}>
                 <div className="p-3 min-w-[250px] select-none text-xs font-sans space-y-2 bg-[#0D1527] text-[#F8FAFC] border border-[#1E3154] rounded-lg">
                   
                   {/* Popup Header */}
@@ -324,21 +384,50 @@ export const GISMap = ({
                     </div>
                   </div>
 
-                  {/* Inspect Button opening full inspection view */}
+                  {/* Inspect Button opening full sonar evidence viewer */}
                   <button 
-                    onClick={() => handleMarkerClick(tgt)}
-                    className="w-full py-1.5 px-3 bg-[#0284C7] hover:bg-[#0369A1] text-white rounded text-xs font-mono font-bold text-center transition flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(2,132,199,0.3)]"
+                    onClick={() => {
+                      if (onOpenEvidence) {
+                        onOpenEvidence(tgt);
+                      } else {
+                        handleMarkerClick(tgt);
+                      }
+                    }}
+                    className="w-full py-1.5 px-3 bg-[#0284C7] hover:bg-[#0369A1] text-white rounded text-xs font-mono font-bold text-center transition flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(2,132,199,0.3)] cursor-pointer"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Inspect Target Details &rarr;
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Open Full Sonar Evidence &rarr;
                   </button>
                 </div>
               </Popup>
             </Marker>
           );
         })}
-      </MapContainer>      {/* Floating Controls: Basemap Layer Switcher & Fit Targets */}
+      </MapContainer>
+
+      {/* Floating Controls: Zoom Controls, Basemap Layer Switcher & Fit Targets */}
       <div className={`absolute ${compact ? 'top-2 right-2 gap-1.5' : 'top-4 right-4 gap-2'} z-[1000] flex items-center`} ref={layerMenuRef}>
+        {/* Manual Zoom Controls: [+] [Zoom Level] [-] */}
+        <div className="flex items-center bg-white/95 backdrop-blur rounded-2xl shadow-lg border border-[#E9EDF7] p-0.5">
+          <button
+            onClick={() => mapInstance?.zoomIn()}
+            className={`${compact ? 'w-6 h-6' : 'w-7 h-7'} flex items-center justify-center text-[#1B2559] hover:bg-[#F4F7FB] hover:text-[#0284C7] rounded-xl transition cursor-pointer font-bold`}
+            title="Zoom In (+)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          <span className={`${compact ? 'text-[9px] px-1 min-w-[24px]' : 'text-[10px] px-1.5 min-w-[28px]'} font-mono font-bold text-[#64748B] text-center select-none`}>
+            {Math.round(currentZoom)}x
+          </span>
+          <button
+            onClick={() => mapInstance?.zoomOut()}
+            className={`${compact ? 'w-6 h-6' : 'w-7 h-7'} flex items-center justify-center text-[#1B2559] hover:bg-[#F4F7FB] hover:text-[#0284C7] rounded-xl transition cursor-pointer font-bold`}
+            title="Zoom Out (-)"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         {/* Basemap Switcher Dropdown */}
         <div className="relative">
           <button

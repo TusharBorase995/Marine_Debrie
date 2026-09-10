@@ -20,8 +20,8 @@ def get_surveys():
         s_copy["id"] = surv_id
         s_copy["survey_id"] = surv_id
         s_copy["file_format"] = s.get("file_format") or s.get("file_type", "xtf")
-        s_copy["file_size_bytes"] = s.get("file_size_bytes") or int(s.get("file_size_mb", 50) * 1024 * 1024)
-        s_copy["ping_count"] = s.get("ping_count", 1240)
+        s_copy["file_size_bytes"] = s.get("file_size_bytes") or int(s.get("file_size_mb", 0) * 1024 * 1024)
+        s_copy["ping_count"] = s.get("ping_count", 0)
         res.append(s_copy)
     return res
 
@@ -35,8 +35,8 @@ def get_survey_by_id(survey_id: str):
             s_copy["id"] = s_id
             s_copy["survey_id"] = s_id
             s_copy["file_format"] = s.get("file_format") or s.get("file_type", "xtf")
-            s_copy["file_size_bytes"] = s.get("file_size_bytes") or int(s.get("file_size_mb", 50) * 1024 * 1024)
-            s_copy["ping_count"] = s.get("ping_count", 1240)
+            s_copy["file_size_bytes"] = s.get("file_size_bytes") or int(s.get("file_size_mb", 0) * 1024 * 1024)
+            s_copy["ping_count"] = s.get("ping_count", 0)
             return s_copy
     raise HTTPException(status_code=404, detail=f"Survey '{survey_id}' not found")
 

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 
@@ -19,14 +19,15 @@ class CanonicalDetectionPayload(BaseModel):
     target_id: str = Field(..., description="Unique physical target ID (e.g. TGT-023)")
     class_name: str = Field(..., alias="class", description="Target classification (e.g. debris_net, pipe_cylinder, wreck_structure)")
     confidence: float = Field(..., description="Classification confidence between 0.0 and 1.0")
-    latitude: float = Field(..., description="WGS84 latitude coordinate")
-    longitude: float = Field(..., description="WGS84 longitude coordinate")
+    latitude: Optional[float] = Field(default=None, description="WGS84 latitude coordinate")
+    longitude: Optional[float] = Field(default=None, description="WGS84 longitude coordinate")
     estimated_size_m: float = Field(..., description="Physical object dimension in meters")
     shadow_verified: bool = Field(default=True, description="U-Net acoustic shadow verification status")
     status: str = Field(default="pending_review", description="Review status (pending_review, verified, rejected)")
     timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp")
     sonar_image_ref: Optional[str] = Field(default=None, description="Path or URL to detected sonar evidence image")
     bounding_box: Optional[Dict[str, Any]] = Field(default=None, description="Optional bounding box coordinates {x, y, width, height}")
+    segmentation: Optional[List[List[Union[float, int]]]] = Field(default=None, description="Polygon points [[x, y], ...]")
     mask_ref: Optional[str] = Field(default=None, description="Optional segmentation mask reference")
 
     @field_validator("confidence")
@@ -50,13 +51,23 @@ class CanonicalDetectionPayload(BaseModel):
             return "rejected"
         return "pending_review"
 
-@router.post("/detections", status_code=status.HTTP_201_CREATED)
-async def ingest_ml_detection(payload: CanonicalDetectionPayload):
+class FrameDetectionsPayload(BaseModel):
     """
-    POST /api/ml/detections — Primary ML System Ingestion Endpoint.
-    Accepts structured JSON detection results from CV inference (AUV, shipboard edge, or post-mission server).
-    Validates, stores, resolves evidence image, and broadcasts via WebSocket to connected dashboards.
+    Combined Sonar Frame Detection Payload.
+    Allows submitting a single sonar frame image reference with multiple detected targets.
     """
+    model_config = ConfigDict(populate_by_name=True)
+
+    sonar_image_ref: str = Field(..., description="Full sonar frame image reference (e.g. survey_042_frame_0187.png)")
+    mission_id: Optional[str] = Field(default=None, description="Target survey mission ID")
+    timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp")
+    detections: List[CanonicalDetectionPayload] = Field(..., description="List of target detections in this frame")
+
+
+async def _process_single_canonical_detection(payload: CanonicalDetectionPayload, mission_id: Optional[str] = None) -> Dict[str, Any]:
+    """Internal helper to process, persist, and broadcast a single CanonicalDetectionPayload."""
+    from app.db.repository import repo
+    resolved_mission_id = repo.resolve_target_mission(mission_id, ingestion_mode="live")
     ts = payload.timestamp or datetime.now(timezone.utc).isoformat()
     
     # Resolve and normalize sonar evidence image reference
@@ -76,7 +87,9 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
         "wreck_structure": "Historic Shipwreck Structure",
         "cargo_container": "Submerged Cargo Container",
         "naval_mine": "Acoustic Mine Anomaly",
-        "pipe_joint": "Pipeline Free-Span & Joint"
+        "pipe_joint": "Pipeline Free-Span & Joint",
+        "concrete_block": "Submerged Concrete Block",
+        "tire": "Acoustic Tire Hazard"
     }
     label = label_map.get(payload.class_name.lower(), payload.class_name.replace("_", " ").title())
 
@@ -87,16 +100,18 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
         "class": payload.class_name,
         "category": payload.class_name,
         "confidence": round(payload.confidence, 2),
-        "latitude": round(payload.latitude, 6),
-        "longitude": round(payload.longitude, 6),
+        "latitude": round(payload.latitude, 6) if payload.latitude is not None else None,
+        "longitude": round(payload.longitude, 6) if payload.longitude is not None else None,
         "estimated_size_m": round(payload.estimated_size_m, 1),
         "shadow_verified": payload.shadow_verified,
         "status": payload.status,
         "human_review_status": payload.status,
         "timestamp": ts,
         "sonar_image_ref": evidence_image,
-        "bounding_box": payload.bounding_box or {"x": 180, "y": 140, "width": 280, "height": 200},
+        "bounding_box": payload.bounding_box,
+        "segmentation": payload.segmentation,
         "mask_ref": payload.mask_ref,
+        "mission_id": resolved_mission_id,
         "pass_number": 1,
         "survey_leg": "ML Real-Time Stream"
     }
@@ -114,14 +129,18 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
             (sum(d["confidence"] for d in existing_tgt["observations"]) / len(existing_tgt["observations"])) * 0.25,
             2
         )
-        # Refine physical target canonical coordinates to centroid of all passes
-        existing_tgt["latitude"] = round(
-            sum(d["latitude"] for d in existing_tgt["observations"]) / len(existing_tgt["observations"]), 6
-        )
-        existing_tgt["longitude"] = round(
-            sum(d["longitude"] for d in existing_tgt["observations"]) / len(existing_tgt["observations"]), 6
-        )
+        # Refine physical target canonical coordinates to centroid of all passes with coordinates
+        valid_lats = [d["latitude"] for d in existing_tgt["observations"] if d.get("latitude") is not None]
+        valid_lons = [d["longitude"] for d in existing_tgt["observations"] if d.get("longitude") is not None]
+        existing_tgt["latitude"] = round(sum(valid_lats) / len(valid_lats), 6) if valid_lats else None
+        existing_tgt["longitude"] = round(sum(valid_lons) / len(valid_lons), 6) if valid_lons else None
         existing_tgt["sonar_image_ref"] = evidence_image
+        if payload.bounding_box:
+            existing_tgt["bounding_box"] = payload.bounding_box
+        if payload.segmentation:
+            existing_tgt["segmentation"] = payload.segmentation
+        if payload.mask_ref:
+            existing_tgt["mask_ref"] = payload.mask_ref
     else:
         new_tgt = {
             "target_id": payload.target_id,
@@ -129,8 +148,8 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
             "class": payload.class_name,
             "category": payload.class_name,
             "label": label,
-            "latitude": round(payload.latitude, 6),
-            "longitude": round(payload.longitude, 6),
+            "latitude": round(payload.latitude, 6) if payload.latitude is not None else None,
+            "longitude": round(payload.longitude, 6) if payload.longitude is not None else None,
             "estimated_size_m": round(payload.estimated_size_m, 1),
             "status": payload.status,
             "human_review_status": payload.status,
@@ -138,6 +157,10 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
             "fused_confidence": round(payload.confidence, 2),
             "observation_count": 1,
             "sonar_image_ref": evidence_image,
+            "bounding_box": payload.bounding_box,
+            "segmentation": payload.segmentation,
+            "mask_ref": payload.mask_ref,
+            "mission_id": resolved_mission_id,
             "observations": [record]
         }
         db_mock.targets.append(new_tgt)
@@ -165,6 +188,36 @@ async def ingest_ml_detection(payload: CanonicalDetectionPayload):
         "image_url": record.get("sonar_image_ref"),
         "detection": record
     }
+
+
+@router.post("/detections", status_code=status.HTTP_201_CREATED)
+async def ingest_ml_detection(payload: Union[FrameDetectionsPayload, CanonicalDetectionPayload]):
+    """
+    POST /api/ml/detections — Primary ML System Ingestion Endpoint.
+    Accepts:
+    1. Single target detection (CanonicalDetectionPayload)
+    2. Combined sonar frame with multiple detections (FrameDetectionsPayload)
+    Validates, stores, resolves evidence image, and broadcasts via WebSocket to connected dashboards.
+    """
+    if isinstance(payload, FrameDetectionsPayload):
+        from app.db.repository import repo
+        target_mission = repo.resolve_target_mission(payload.mission_id, ingestion_mode="live")
+        results = []
+        for det in payload.detections:
+            if not det.sonar_image_ref and payload.sonar_image_ref:
+                det.sonar_image_ref = payload.sonar_image_ref
+            res = await _process_single_canonical_detection(det, mission_id=target_mission)
+            results.append(res["detection"])
+        return {
+            "success": True,
+            "message": f"Successfully ingested {len(results)} detections for frame '{payload.sonar_image_ref}'.",
+            "count": len(results),
+            "mission_id": target_mission,
+            "sonar_image_ref": payload.sonar_image_ref,
+            "detections": results
+        }
+
+    return await _process_single_canonical_detection(payload)
 
 @router.post("/upload-evidence", status_code=status.HTTP_201_CREATED)
 async def upload_sonar_evidence_image(
@@ -240,23 +293,32 @@ async def ingest_batch_detections(payload: Dict[str, Any]):
     if not isinstance(det_list, list) or len(det_list) == 0:
         raise HTTPException(status_code=400, detail="Payload must contain a non-empty 'detections' array.")
 
+    top_level_image = payload.get("sonar_image_ref") if isinstance(payload, dict) else None
+    from app.db.repository import repo
+    specified_mission = (payload.get("mission_id") or payload.get("survey_id")) if isinstance(payload, dict) else None
+    default_mission = repo.resolve_target_mission(specified_mission, ingestion_mode="batch")
     results = []
     for item in det_list:
         try:
+            raw_lat = item.get("latitude")
+            raw_lon = item.get("longitude")
             canonical = CanonicalDetectionPayload(
                 target_id=item.get("target_id") or f"TGT-{db_mock.next_tgt_id:03d}",
                 class_name=item.get("class") or item.get("class_name") or "debris_net",
                 confidence=float(item.get("confidence", 0.85)),
-                latitude=float(item.get("latitude", 32.6500)),
-                longitude=float(item.get("longitude", -117.5500)),
+                latitude=float(raw_lat) if raw_lat is not None else None,
+                longitude=float(raw_lon) if raw_lon is not None else None,
                 estimated_size_m=float(item.get("estimated_size_m", 3.0)),
                 shadow_verified=bool(item.get("shadow_verified", True)),
                 status=str(item.get("status", "pending_review")),
                 timestamp=item.get("timestamp"),
-                sonar_image_ref=item.get("sonar_image_ref"),
-                bounding_box=item.get("bounding_box")
+                sonar_image_ref=item.get("sonar_image_ref") or top_level_image,
+                bounding_box=item.get("bounding_box"),
+                segmentation=item.get("segmentation"),
+                mask_ref=item.get("mask_ref")
             )
-            res = await ingest_ml_detection(canonical)
+            item_mission = item.get("mission_id") or default_mission
+            res = await _process_single_canonical_detection(canonical, mission_id=item_mission)
             results.append(res["detection"])
         except Exception as ex:
             print(f"[Batch Ingestion Warning] Skipping item: {ex}")
