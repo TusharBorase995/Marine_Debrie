@@ -70,3 +70,46 @@
   background-image: radial-gradient(rgba(2, 132, 199, 0.08) 1px, transparent 0);
   background-size: 20px 20px;
 }
+
+/* Sarvam Marquee & Fluid Animation Utilities */
+@keyframes sarvamMarquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-sarvam-marquee {
+  display: flex;
+  width: max-content;
+  animation: sarvamMarquee 38s linear infinite;
+}
+
+.animate-sarvam-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Dot grid background */
+.bg-sarvam-dots {
+  background-image: radial-gradient(circle, #1e2033 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Smooth reveal transitions */
+.sarvam-glass {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 228, 237, 0.7);
+}
+
+.sarvam-card {
+  background: #ffffff;
+  border: 1px solid rgba(226, 228, 237, 0.85);
+  box-shadow: 0 1px 3px rgba(30, 32, 51, 0.03), 0 4px 12px rgba(30, 32, 51, 0.02);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sarvam-card:hover {
+  border-color: rgba(99, 102, 241, 0.25);
+  box-shadow: 0 8px 24px -4px rgba(30, 32, 51, 0.07);
+}
+

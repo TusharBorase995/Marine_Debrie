@@ -11,6 +11,7 @@ import Detections from './pages/Detections';
 import MapPage from './pages/MapPage';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
+import ContactPage from './pages/ContactPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import { MissionProvider } from './context/MissionContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -48,9 +49,10 @@ export default function App() {
       <MissionProvider>
         <BrowserRouter>
           <Routes>
-            {/* Public Cinematic Landing Page */}
+            {/* Public Cinematic Landing Page & Contact Us */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/landing" element={<LandingPage />} />
+            <Route path="/contact" element={<ContactPage />} />
 
             {/* Operational Application Platform */}
             <Route path="/*" element={<MainAppLayout connected={connected} />} />
