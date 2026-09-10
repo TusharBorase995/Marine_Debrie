@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 
@@ -283,28 +283,22 @@ async def upload_batch_json_file(file: UploadFile = File(...)):
     
     return await ingest_batch_detections(data)
 
-@router.get("/sample-batch")
+@router.get("/sample-batch", status_code=status.HTTP_400_BAD_REQUEST)
 def get_sample_batch():
     """
-    GET /api/ml/sample-batch — Returns pre-packaged 32-target prototype dataset.
+    Sample prototype dataset has been removed for production deployable operation.
     """
-    import os
-    import json
-    data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "sample_detections_batch.json")
-    if os.path.exists(data_path):
-        with open(data_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"survey_id": "SURV-001", "detections": []}
+    raise HTTPException(
+        status_code=400,
+        detail="Sample prototype datasets are disabled. Only real batch or API detection data is accepted."
+    )
 
-@router.post("/load-sample", status_code=status.HTTP_200_OK)
+@router.post("/load-sample", status_code=status.HTTP_400_BAD_REQUEST)
 async def load_sample_dataset():
     """
-    POST /api/ml/load-sample — Ingests the complete 32-target prototype dataset into the application.
+    Sample prototype dataset loading is disabled for production deployable operation.
     """
-    sample = get_sample_batch()
-    res = await ingest_batch_detections(sample)
-    await ws_manager.broadcast({
-        "type": "BATCH_LOADED",
-        "count": res["count"]
-    })
-    return res
+    raise HTTPException(
+        status_code=400,
+        detail="Sample prototype datasets are disabled. Ingest real survey detection batches via POST /api/missions/{mission_id}/import."
+    )

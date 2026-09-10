@@ -17,19 +17,23 @@ def run_tests():
     init_tables()
     print("[PASS] Schema creation / migration")
 
-    # 2. Seed default data
-    repo.seed_initial_data_if_empty(force=True)
-    print("[PASS] Initial data seeding")
+    # 2. Reset / clean state for test run
+    repo.clear_all()
+    print("[PASS] Database clear / reset")
 
-    # 3. Query missions
+    # 3. Create test mission
+    test_mission = repo.create_or_update_mission({
+        "mission_id": "MISSION-DBTEST",
+        "survey_name": "Database Unit Test Survey",
+        "description": "Automated persistence verification",
+        "ingestion_mode": "batch"
+    })
+    print(f"[PASS] Created test mission '{test_mission['mission_id']}'")
+
+    # 4. Query missions
     missions = repo.get_all_missions()
-    print(f"[PASS] Query missions: found {len(missions)} missions")
-    assert len(missions) >= 4, f"Expected at least 4 missions, got {len(missions)}"
-
-    # 4. Query targets
-    targets = repo.get_consolidated_targets()
-    print(f"[PASS] Query targets: found {len(targets)} consolidated physical targets")
-    assert len(targets) >= 6, f"Expected at least 6 targets, got {len(targets)}"
+    print(f"[PASS] Query missions: found {len(missions)} mission(s)")
+    assert any(m["mission_id"] == "MISSION-DBTEST" for m in missions), "Test mission not found"
 
     # 5. Insert new detection
     new_det = {
@@ -42,12 +46,17 @@ def run_tests():
         "estimated_size_m": 8.5,
         "shadow_verified": True,
         "status": "pending_review",
-        "mission_id": "MISSION-LIVE"
+        "mission_id": "MISSION-DBTEST"
     }
     insert_res = repo.insert_detection(new_det)
     print(f"[PASS] Insert detection: created target '{insert_res['target']['target_id']}' with observation '{insert_res['detection']['id']}'")
 
-    # 6. Review target
+    # 6. Query targets
+    targets = repo.get_consolidated_targets()
+    print(f"[PASS] Query targets: found {len(targets)} consolidated physical target(s)")
+    assert any(t["target_id"] == "TGT-TEST-01" for t in targets), "Test target not found"
+
+    # 7. Review target
     reviewed = repo.review_target("TGT-TEST-01", "confirmed")
     assert reviewed, "Target review failed"
     targets_after = repo.get_consolidated_targets()
@@ -55,14 +64,11 @@ def run_tests():
     assert test_tgt and test_tgt["status"] == "confirmed", "Status not updated to confirmed"
     print("[PASS] Review target to 'confirmed'")
 
-    # 7. Clear database
+    # 8. Clear database
     clear_res = repo.clear_all()
+    repo.delete_mission("MISSION-DBTEST")
     print(f"[PASS] Clear all: {clear_res['message']}")
     assert len(repo.get_consolidated_targets()) == 0, "Targets not cleared"
-
-    # 8. Restore default data
-    repo.seed_initial_data_if_empty(force=True)
-    print(f"[PASS] Restore default data: {len(repo.get_consolidated_targets())} targets restored")
 
     print("==================================================")
     print("ALL 8 DATABASE PERSISTENCE TESTS PASSED 100%!")

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crosshair, ZoomIn, Info, Eye, Layers } from 'lucide-react';
+import { Crosshair, ZoomIn, Info, Layers } from 'lucide-react';
 import { formatConfidence, formatClassLabel } from '../utils/formatters';
 
 export const SonarWaterfall = ({ 

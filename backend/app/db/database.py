@@ -25,7 +25,6 @@ for env_candidate in [
 
 # Primary database configured for PostgreSQL; can be overridden by DATABASE_URL env var
 DEFAULT_POSTGRES_URL = "postgresql://postgres:postgres@localhost:5432/sonar_db"
-DEFAULT_SQLITE_URL = "sqlite:///./sonar_db.sqlite3"
 raw_db_url = os.getenv("DATABASE_URL", "").strip()
 
 if raw_db_url:
@@ -39,52 +38,27 @@ else:
 logger.info(f"Configuring Database with URL scheme: {DATABASE_URL.split('://')[0]}://...")
 
 def create_db_engine(url: str):
-    """Creates a SQLAlchemy engine with robust pooling and auto-recovery."""
-    if url.startswith("sqlite"):
-        return create_engine(
-            url,
-            connect_args={"check_same_thread": False},
-            echo=False
-        )
-    else:
-        # PostgreSQL engine configuration
-        return create_engine(
-            url,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,  # Automatically reconnect dropped cloud connections (Supabase/Neon)
-            pool_recycle=300,
-            echo=False
-        )
+    """Creates a SQLAlchemy PostgreSQL engine with robust pooling and auto-recovery."""
+    return create_engine(
+        url,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,  # Automatically ping and reconnect dropped connections
+        pool_recycle=300,
+        connect_args={"connect_timeout": 5},
+        echo=False
+    )
 
-if DATABASE_URL.startswith("sqlite"):
-    logger.info(f"Explicit SQLite mode configured: {DATABASE_URL}")
-    engine = create_db_engine(DATABASE_URL)
-else:
-    try:
-        engine = create_db_engine(DATABASE_URL)
-        with engine.connect() as conn:
-            logger.info("Successfully connected to PostgreSQL database!")
-    except Exception as e:
-        target_host = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
-        err_msg = (
-            f"\n"
-            f"================================================================================\n"
-            f"FATAL DATABASE ERROR: Unable to connect to PostgreSQL at '{target_host}'.\n"
-            f"Details: {e}\n"
-            f"--------------------------------------------------------------------------------\n"
-            f"To prevent data fragmentation / split data across multiple databases,\n"
-            f"silent fallback to SQLite is disabled.\n\n"
-            f"Please verify that:\n"
-            f"  1. PostgreSQL service is running\n"
-            f"  2. Credentials in backend/.env are correct\n"
-            f"  3. Database 'sonar_db' exists\n\n"
-            f"(If you explicitly wish to run in local offline demo mode without PostgreSQL,\n"
-            f" set DATABASE_URL=sqlite:///./sonar_db.sqlite3 in your backend/.env file).\n"
-            f"================================================================================\n"
-        )
-        logger.error(err_msg)
-        raise RuntimeError(err_msg) from e
+engine = create_db_engine(DATABASE_URL)
+try:
+    with engine.connect() as conn:
+        logger.info("Successfully connected to PostgreSQL database!")
+except Exception as e:
+    target_host = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
+    logger.warning(
+        f"Unable to connect to PostgreSQL at '{target_host}' on startup ({e}). "
+        f"The server is running in degraded mode and will re-attempt connection when PostgreSQL is started."
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

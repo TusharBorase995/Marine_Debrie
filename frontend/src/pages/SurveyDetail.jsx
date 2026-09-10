@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, FileText, Compass, Waves, CheckCircle, Target, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Play, FileText, Compass, Waves, Target, RefreshCw } from 'lucide-react';
 import surveyService from '../services/surveyService';
 import detectionService from '../services/detectionService';
 import jobService from '../services/jobService';

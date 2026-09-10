@@ -1,7 +1,5 @@
-import os
-import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import desc
@@ -31,7 +29,7 @@ def init_tables():
 class SonarRepository:
     """
     Data Access Repository for Hydrographic Survey System.
-    Handles persistence across PostgreSQL (and local SQLite fallback).
+    Handles persistence in PostgreSQL database.
     """
 
     @staticmethod
@@ -66,20 +64,15 @@ class SonarRepository:
             return session.query(SonarImageModel).filter(SonarImageModel.image_id == image_id).first()
 
     @classmethod
-    def seed_initial_data_if_empty(cls, force: bool = False):
-        """
-        No automatic seed data per specification.
-        The database starts completely empty with 0 detections/targets until real data
-        is provided through the backend APIs (Live or Batch).
-        """
-        if force:
-            with cls.get_session() as session:
-                session.query(ObservationModel).delete()
-                session.query(TargetModel).delete()
-                session.query(MissionModel).delete()
-                session.query(SonarImageModel).delete()
-                session.commit()
-                logger.info("Database reset: all records purged.")
+    def purge_all_data(cls):
+        """Purges all records from the database. Zero automatic seed data."""
+        with cls.get_session() as session:
+            session.query(ObservationModel).delete()
+            session.query(TargetModel).delete()
+            session.query(MissionModel).delete()
+            session.query(SonarImageModel).delete()
+            session.commit()
+            logger.info("Database records purged.")
 
     @classmethod
     def get_all_missions(cls) -> List[Dict[str, Any]]:

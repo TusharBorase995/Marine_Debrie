@@ -2,8 +2,8 @@ import os
 import shutil
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
+from typing import List
+from fastapi import APIRouter, HTTPException, UploadFile, File, status
 from mock_data import db_mock
 
 router = APIRouter(prefix="/api/surveys", tags=["Surveys API"])

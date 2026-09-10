@@ -1,7 +1,6 @@
 import asyncio
-import time
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from ..parsers.mock_parser import MockXTFJSFParser
 from ..ml.mock_provider import MockInferenceProvider

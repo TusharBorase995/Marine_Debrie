@@ -59,8 +59,6 @@ except Exception as e:
 def on_startup():
     try:
         init_tables()
-        repo.seed_initial_data_if_empty()
-        db_mock.sync_from_db()
     except Exception as e:
         print(f"[DB] Startup initialization warning: {e}")
 
@@ -78,13 +76,21 @@ from app.db.database import engine
 @app.get("/api/health")
 def health_check():
     """System Health Endpoint per API contract specification."""
-    db_type = "postgresql" if "postgres" in str(engine.url) else "sqlite"
+    db_type = "postgresql"
     db_status = "connected"
     db_error = None
+    db_version = None
+    db_name = "sonar_db"
+    db_port = 5432
+
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+            row = conn.execute(text("SELECT version(), current_database(), inet_server_port();")).fetchone()
+            if row:
+                db_version = row[0].split(",")[0] if row[0] else "PostgreSQL"
+                db_name = row[1] or "sonar_db"
+                db_port = row[2] or 5432
     except Exception as e:
         db_status = "disconnected"
         db_error = str(e)
@@ -99,7 +105,10 @@ def health_check():
             "engine": db_type,
             "url_scheme": str(engine.url).split("://")[0],
             "status": db_status,
-            "error": db_error
+            "error": db_error,
+            "version": db_version,
+            "database_name": db_name,
+            "server_port": db_port
         },
         "endpoints": {
             "live_detection": "POST /api/detections",

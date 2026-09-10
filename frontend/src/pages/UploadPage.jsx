@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  UploadCloud, Play, Pause, CheckCircle2, AlertCircle, RefreshCw, 
-  Sparkles, Terminal, Radio, Archive, Database, ArrowRight, FileJson,
+  UploadCloud, CheckCircle2, AlertCircle, RefreshCw, 
+  Sparkles, Terminal, Radio, Archive, Database, ArrowRight,
   Compass, MapPin, Disc, Check
 } from 'lucide-react';
 import axios from 'axios';
@@ -22,7 +22,7 @@ export const UploadPage = () => {
   } = useMission();
 
   const [targetMissionId, setTargetMissionId] = useState(() => {
-    return selectedMissionId !== 'ALL' ? selectedMissionId : 'MISSION-002';
+    return selectedMissionId !== 'ALL' ? selectedMissionId : (missions?.[0]?.mission_id || '');
   });
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -31,20 +31,28 @@ export const UploadPage = () => {
   const [batchStatus, setBatchStatus] = useState(null);
   const [error, setError] = useState('');
   
-  // Streaming Simulator State (Mode A)
-  const [isStreaming, setIsStreaming] = useState(false);
+  // Real Live Stream Ingestion Monitor (Mode A)
   const [streamCount, setStreamCount] = useState(0);
-  const [lastEmitted, setLastEmitted] = useState(null);
-  const streamIntervalRef = useRef(null);
+  const [lastReceived, setLastReceived] = useState(null);
 
-  const { isConnected: wsConnected } = useWebSocket('/ws/live-feed');
+  const { isConnected: wsConnected, data: wsData } = useWebSocket('/ws/live-feed');
+
+  // Monitor incoming real ML detections over WebSocket
+  useEffect(() => {
+    if (wsData && wsData.type === 'NEW_DETECTION' && wsData.data) {
+      setLastReceived(wsData.data);
+      setStreamCount(prev => prev + 1);
+    }
+  }, [wsData]);
 
   // Keep targetMissionId in sync when active mission changes
   useEffect(() => {
     if (selectedMissionId && selectedMissionId !== 'ALL') {
       setTargetMissionId(selectedMissionId);
+    } else if (missions?.length > 0 && !targetMissionId) {
+      setTargetMissionId(missions[0].mission_id);
     }
-  }, [selectedMissionId]);
+  }, [selectedMissionId, missions]);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -141,74 +149,7 @@ export const UploadPage = () => {
     }
   };
 
-  // Quick load pre-packaged prototype dataset via POST /api/missions/{mission_id}/import
-  const handleLoadSampleBatch = async () => {
-    const mId = targetMissionId.trim() || 'MISSION-001';
-    try {
-      setUploading(true);
-      setError('');
-      setBatchStatus(null);
-      
-      const sampleResp = await axios.get('/api/ml/sample-batch');
-      const sampleData = sampleResp.data;
-      const res = await missionService.importBatch(mId, sampleData, false);
-      const count = res?.imported_count ?? res?.count ?? (Array.isArray(sampleData) ? sampleData.length : 0);
 
-      await runValidationSequence(count, mId);
-
-      setBatchStatus({
-        success: true,
-        message: `Successfully imported complete survey batch (${count} detections) into ${mId}.`,
-        count,
-        missionId: mId
-      });
-
-      setSelectedMissionId(mId);
-      refreshMissions();
-    } catch (err) {
-      console.error("Load sample batch error:", err);
-      setError("Failed to load sample mission batch.");
-      setValidationSteps([]);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  // Emit single simulated ML detection via POST /api/detections
-  const handleEmitSingleDetection = async () => {
-    try {
-      const mId = targetMissionId.trim() || 'MISSION-003';
-      const res = await axios.post('/api/ml/simulate');
-      const det = res.data.detection;
-      det.mission_id = mId;
-      setLastEmitted(det);
-      setStreamCount(prev => prev + 1);
-    } catch (err) {
-      console.error("Simulation error:", err);
-    }
-  };
-
-  // Toggle continuous live streaming simulation
-  const toggleStreaming = () => {
-    if (isStreaming) {
-      clearInterval(streamIntervalRef.current);
-      setIsStreaming(false);
-    } else {
-      setIsStreaming(true);
-      handleEmitSingleDetection();
-      streamIntervalRef.current = setInterval(() => {
-        handleEmitSingleDetection();
-      }, 3000);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-      }
-    };
-  }, []);
 
   return (
     <div className="p-8 max-w-7xl mx-auto w-full space-y-6 font-sans bg-[#F8FAFC] text-slate-800 min-h-screen">
@@ -378,7 +319,7 @@ export const UploadPage = () => {
               The ML system streams detections continuously one-by-one as computer-vision inference executes onboard. New arrivals appear immediately on the Dashboard, GIS Map, and Target Review list via WebSocket <code className="text-indigo-600 font-bold">/ws/live-feed</code> with subtle professional arrival animations.
             </p>
 
-            {/* Stream Controller Box */}
+            {/* Real-Time Live Feed Status Box */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
@@ -388,14 +329,14 @@ export const UploadPage = () => {
                   <div className="flex items-center gap-2 mt-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="font-bold text-xs text-slate-900">
-                      Connected to /ws/live-feed
+                      Listening on /ws/live-feed
                     </span>
                   </div>
                 </div>
 
                 <div className="text-right">
                   <span className="text-[10px] font-bold uppercase text-slate-400 block">
-                    Streamed Live
+                    Live Stream Ingested
                   </span>
                   <span className="font-black text-sm text-indigo-600 font-mono">
                     {streamCount} detections
@@ -403,45 +344,17 @@ export const UploadPage = () => {
                 </div>
               </div>
 
-              {/* Streaming Buttons */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={handleEmitSingleDetection}
-                  className="py-2 px-3 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  Emit 1 Detection
-                </button>
-
-                <button
-                  type="button"
-                  onClick={toggleStreaming}
-                  className={`py-2 px-3 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm ${
-                    isStreaming 
-                      ? 'bg-red-600 hover:bg-red-700 text-white' 
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  }`}
-                >
-                  {isStreaming ? (
-                    <>
-                      <Pause className="w-3.5 h-3.5" /> Pause Live Feed
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5 fill-current" /> Start Live Stream
-                    </>
-                  )}
-                </button>
+              <div className="text-[11px] text-slate-600 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
+                Active telemetry listener. Real detection packages received from shipboard inference models via <code className="text-indigo-600 font-bold">POST /api/detections</code> will automatically appear here and broadcast instantly across the workstation.
               </div>
             </div>
 
-            {/* Last Emitted Target Card */}
-            {lastEmitted ? (
+            {/* Last Ingested Detection Card */}
+            {lastReceived ? (
               <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2 font-mono">
                 <div className="flex items-center justify-between text-[10px]">
                   <span className="text-emerald-700 font-bold uppercase flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5" /> Emitted into {targetMissionId}
+                    <Sparkles className="w-3.5 h-3.5" /> Ingested into {lastReceived.mission_id || targetMissionId}
                   </span>
                   <span className="text-slate-400">
                     {new Date().toLocaleTimeString()}
@@ -449,21 +362,21 @@ export const UploadPage = () => {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-10 bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shrink-0 flex items-center justify-center">
-                    {lastEmitted.sonar_image_ref ? (
-                      <img src={lastEmitted.sonar_image_ref} alt="" className="w-full h-full object-cover contrast-125" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    {lastReceived.sonar_image_ref ? (
+                      <img src={lastReceived.sonar_image_ref} alt="" className="w-full h-full object-cover contrast-125" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                     ) : (
-                      <span className="text-[8px] font-mono text-slate-500 font-bold">N/A</span>
+                      <span className="text-[8px] font-mono text-slate-500 font-bold">RAW</span>
                     )}
                   </div>
                   <div className="text-xs">
-                    <div className="font-bold text-slate-900">{lastEmitted.target_id} • {formatClassLabel(lastEmitted.class)}</div>
-                    <div className="text-[10px] text-emerald-700 font-bold">Conf: {formatConfidence(lastEmitted.confidence)} • Size: {formatSize(lastEmitted.estimated_size_m)}</div>
+                    <div className="font-bold text-slate-900">{lastReceived.target_id || lastReceived.id} • {formatClassLabel(lastReceived.class || lastReceived.category)}</div>
+                    <div className="text-[10px] text-emerald-700 font-bold">Conf: {formatConfidence(lastReceived.confidence)} • Size: {formatSize(lastReceived.estimated_size_m)}</div>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-400">
-                Click "Start Live Stream" or "Emit 1 Detection" to simulate real-time ML arrivals.
+                Awaiting real incoming ML inference detections via <code className="text-indigo-600">POST /api/detections</code>.
               </div>
             )}
           </div>
@@ -554,21 +467,10 @@ export const UploadPage = () => {
                 <button
                   type="submit"
                   disabled={uploading || !selectedFile}
-                  className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
                 >
                   <UploadCloud className="w-4 h-4" />
-                  {uploading ? 'Validating & Importing...' : `Import into ${targetMissionId}`}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleLoadSampleBatch}
-                  disabled={uploading}
-                  className="py-2.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl transition disabled:opacity-50 flex items-center gap-1.5"
-                  title="Load pre-packaged realistic 32-target survey batch"
-                >
-                  <Database className="w-3.5 h-3.5 text-indigo-600" />
-                  Load Sample Batch
+                  {uploading ? 'Validating & Importing...' : `Import Batch into ${targetMissionId || 'Selected Mission'}`}
                 </button>
               </div>
             </form>

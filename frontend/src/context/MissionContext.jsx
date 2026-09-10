@@ -16,8 +16,12 @@ export const MissionProvider = ({ children }) => {
 
   // Live PostgreSQL connection health status
   const [dbStatus, setDbStatus] = useState({
-    connected: true,
-    checking: false,
+    connected: false,
+    checking: true,
+    engine: 'postgresql',
+    databaseName: 'sonar_db',
+    version: null,
+    port: 5432,
     error: null,
     lastChecked: null,
   });
@@ -31,6 +35,10 @@ export const MissionProvider = ({ children }) => {
       setDbStatus({
         connected: isConnected,
         checking: false,
+        engine: dbInfo.engine || 'postgresql',
+        databaseName: dbInfo.database_name || 'sonar_db',
+        version: dbInfo.version || null,
+        port: dbInfo.server_port || 5432,
         error: isConnected ? null : (dbInfo.error || 'PostgreSQL service is offline'),
         lastChecked: new Date().toISOString()
       });
@@ -39,7 +47,11 @@ export const MissionProvider = ({ children }) => {
       setDbStatus({
         connected: false,
         checking: false,
-        error: err.response?.data?.database?.error || err.message || 'API or PostgreSQL unreachable',
+        engine: 'postgresql',
+        databaseName: 'sonar_db',
+        version: null,
+        port: 5432,
+        error: err.response?.data?.database?.error || err.message || 'API or PostgreSQL service unreachable',
         lastChecked: new Date().toISOString()
       });
       return false;
@@ -110,6 +122,10 @@ export const MissionProvider = ({ children }) => {
   // Create new mission (mandatory PostgreSQL write)
   const createMission = async (payload) => {
     try {
+      const isConnected = await checkDbHealth();
+      if (!isConnected) {
+        throw new Error("Database Offline: PostgreSQL service ('sonar_db') is not active or unreachable. Please verify your PostgreSQL service is running.");
+      }
       const createFn = missionService.createMission || missionService.create;
       const newMission = await createFn.call(missionService, payload);
       await fetchMissions();
@@ -118,7 +134,6 @@ export const MissionProvider = ({ children }) => {
       }
       return newMission;
     } catch (err) {
-      // Promptly refresh db status indicator
       checkDbHealth();
       throw err;
     }
@@ -127,6 +142,10 @@ export const MissionProvider = ({ children }) => {
   // Delete mission (mandatory PostgreSQL delete)
   const deleteMission = async (missionId) => {
     try {
+      const isConnected = await checkDbHealth();
+      if (!isConnected) {
+        throw new Error("Database Offline: PostgreSQL service ('sonar_db') is not active or unreachable. Please verify your PostgreSQL service is running.");
+      }
       const deleteFn = missionService.deleteMission || missionService.delete;
       await deleteFn.call(missionService, missionId);
       await fetchMissions();
@@ -134,7 +153,6 @@ export const MissionProvider = ({ children }) => {
         changeSelectedMission('ALL');
       }
     } catch (err) {
-      // Promptly refresh db status indicator
       checkDbHealth();
       throw err;
     }

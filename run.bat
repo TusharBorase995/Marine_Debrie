@@ -12,7 +12,7 @@ echo [2/3] Starting Frontend (Vite on port 3000)...
 start "Sonar Frontend (Vite)" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
 echo [3/3] Opening Dashboard in browser...
-timeout /t 3 /nobreak >nul
+ping 127.0.0.1 -n 4 >nul
 start http://localhost:3000
 
 echo ================================================================

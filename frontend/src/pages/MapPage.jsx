@@ -1,9 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Map as MapIcon, Filter, Layers, RefreshCw, ShieldCheck, 
-  Compass, Radio, Archive, CheckCircle2, XCircle, ArrowLeft, Disc
-} from 'lucide-react';
+import { Map as MapIcon, Compass, RefreshCw, Disc } from 'lucide-react';
 import GISMap from '../components/GISMap';
 import DetectionDetailPanel from '../components/DetectionDetailPanel';
 import targetService from '../services/targetService';

@@ -1,12 +1,10 @@
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from mock_data import db_mock
-from app.services.image_service import image_service
 from app.api.websocket import ws_manager
-
 from app.db.repository import repo
 
 router = APIRouter(prefix="/api/detections", tags=["Detections API"])

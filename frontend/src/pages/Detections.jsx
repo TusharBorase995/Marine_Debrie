@@ -1,14 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
-  Target, Download, CheckCircle2, XCircle, RefreshCw, 
+  Target, CheckCircle2, XCircle, RefreshCw, 
   Search, LayoutGrid, Table as TableIcon, Filter, 
-  Layers, ShieldCheck, Sparkles, ChevronRight, Eye, Trash2, RotateCcw, AlertTriangle, MapPin, X
+  Layers, Trash2, RotateCcw, AlertTriangle, MapPin, X
 } from 'lucide-react';
 import detectionService from '../services/detectionService';
 import targetService from '../services/targetService';
-import missionService from '../services/missionService';
-import exportService from '../services/exportService';
 import DetectionDetailPanel from '../components/DetectionDetailPanel';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useMission } from '../context/MissionContext';
@@ -16,7 +14,6 @@ import {
   formatConfidence, 
   formatClassLabel, 
   formatSize, 
-  formatCoordinates, 
   formatTimestamp, 
   getStatusBadgeInfo,
   normalizeStatus

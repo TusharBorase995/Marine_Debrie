@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Waves, Compass, MapPin, Target, Shield, Radio, Database, 
-  CheckCircle2, XCircle, ArrowRight, Eye, Layers, Activity, 
+  CheckCircle2, XCircle, ArrowRight, Layers, Activity, 
   Terminal, Crosshair, Anchor, Cpu, Scan, FileText, 
-  Lock, Check, AlertTriangle, ExternalLink, ChevronDown, RefreshCw
+  Lock, ExternalLink, ChevronDown, RefreshCw
 } from 'lucide-react';
 
 export default function LandingPage() {

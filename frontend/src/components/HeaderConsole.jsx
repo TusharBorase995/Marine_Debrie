@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, Compass, Disc, MapPin, FileText, Settings, UploadCloud,
-  Search, Bell, ChevronDown, LogOut, HelpCircle, Download, Trash2, AlertTriangle, ExternalLink,
-  Target, X, CornerDownLeft, Sparkles, Layers, ShieldCheck, ArrowRight,
+  Search, Bell, ChevronDown, LogOut, HelpCircle, Trash2, AlertTriangle, ExternalLink,
+  Target, X, CornerDownLeft, Layers, ArrowRight,
   PanelLeftClose, PanelLeftOpen, Database, CheckCircle2, RefreshCw
 } from 'lucide-react';
-import exportService from '../services/exportService';
 import detectionService from '../services/detectionService';
 import targetService from '../services/targetService';
 import { useMission } from '../context/MissionContext';
@@ -727,19 +726,35 @@ export const Topbar = ({
           {/* PostgreSQL Connection Status Badge */}
           <button
             onClick={() => setShowDbModal(true)}
-            title={dbStatus?.connected ? "PostgreSQL database is online & active (Click for details)" : "PostgreSQL is offline! Click for instructions"}
+            title={
+              dbStatus?.checking && !dbStatus?.lastChecked
+                ? "Checking database status..."
+                : dbStatus?.connected 
+                  ? "PostgreSQL database is online & active (Click for details)" 
+                  : "PostgreSQL is offline! Click for instructions"
+            }
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition shadow-2xs cursor-pointer border ${
-              dbStatus?.connected
-                ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
-                : "bg-red-50 hover:bg-red-100 text-red-700 border-red-300 animate-pulse"
+              dbStatus?.checking && !dbStatus?.lastChecked
+                ? "bg-slate-100 text-slate-600 border-slate-200"
+                : dbStatus?.connected
+                  ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                  : "bg-red-50 hover:bg-red-100 text-red-700 border-red-300 animate-pulse"
             }`}
           >
             <span className={`w-2 h-2 rounded-full shrink-0 ${
-              dbStatus?.connected ? "bg-emerald-500 animate-pulse" : "bg-red-600"
+              dbStatus?.checking && !dbStatus?.lastChecked
+                ? "bg-slate-400 animate-pulse"
+                : dbStatus?.connected ? "bg-emerald-500 animate-pulse" : "bg-red-600"
             }`} />
-            <Database className={`w-3.5 h-3.5 ${dbStatus?.connected ? "text-emerald-600" : "text-red-600"}`} />
+            <Database className={`w-3.5 h-3.5 ${
+              dbStatus?.checking && !dbStatus?.lastChecked
+                ? "text-slate-400"
+                : dbStatus?.connected ? "text-emerald-600" : "text-red-600"
+            }`} />
             <span className="hidden md:inline">
-              {dbStatus?.connected ? "PostgreSQL Active" : "PostgreSQL Offline"}
+              {dbStatus?.checking && !dbStatus?.lastChecked
+                ? "Checking DB..."
+                : dbStatus?.connected ? "PostgreSQL Active" : "PostgreSQL Offline"}
             </span>
           </button>
 
@@ -952,6 +967,11 @@ export const Topbar = ({
                     ? "All missions, sonar detections, and ground-truth reviews are committed directly to your PostgreSQL instance (sonar_db). No data will be lost upon restart."
                     : "The system enforces strict persistence. In-memory temporary fallbacks are completely disabled to prevent accidental data loss. Please start PostgreSQL to proceed."}
                 </p>
+                {dbStatus?.connected && (
+                  <div className="bg-emerald-100/60 text-emerald-900 p-2.5 rounded-lg border border-emerald-200 text-[11px] leading-relaxed">
+                    <strong>Notice regarding pgAdmin 4:</strong> PostgreSQL operates as an independent background Windows Service (<code>postgresql-x64-18</code>) listening on port <code>5432</code>. It accepts connections and persists missions directly to <code>sonar_db</code> whether pgAdmin 4 (the browser administration GUI) is open or closed.
+                  </div>
+                )}
                 {dbStatus?.error && (
                   <p className="font-mono text-[11px] bg-red-100/70 text-red-800 p-2 rounded border border-red-200 break-all">
                     {dbStatus.error}
@@ -977,14 +997,20 @@ export const Topbar = ({
             )}
 
             {/* Technical connection details */}
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 <span className="text-[#64748B] block text-[10px] uppercase font-bold">Database</span>
-                <span className="font-mono font-semibold text-[#0B192C]">sonar_db</span>
+                <span className="font-mono font-semibold text-[#0B192C]">{dbStatus?.databaseName || 'sonar_db'}</span>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 <span className="text-[#64748B] block text-[10px] uppercase font-bold">Host / Port</span>
-                <span className="font-mono font-semibold text-[#0B192C]">localhost:5432</span>
+                <span className="font-mono font-semibold text-[#0B192C]">localhost:{dbStatus?.port || 5432}</span>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 col-span-2 sm:col-span-1">
+                <span className="text-[#64748B] block text-[10px] uppercase font-bold">Engine / Version</span>
+                <span className="font-mono font-semibold text-[#0B192C] truncate block" title={dbStatus?.version || 'PostgreSQL'}>
+                  {dbStatus?.version ? dbStatus.version.replace(' on x86_64-windows', '') : 'PostgreSQL 18'}
+                </span>
               </div>
             </div>
 

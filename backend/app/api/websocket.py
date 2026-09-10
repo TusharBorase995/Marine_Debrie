@@ -1,8 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Set
+from typing import Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from mock_data import db_mock
 
 router = APIRouter(tags=["WebSocket Live Feed"])
 

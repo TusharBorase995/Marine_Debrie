@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Database, Sliders, ShieldCheck, RefreshCw, CheckCircle2, Server } from 'lucide-react';
+import { Settings, Database, Sliders, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 
 export default function SettingsPage() {

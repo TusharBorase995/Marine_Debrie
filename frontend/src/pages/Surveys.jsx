@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
-  Compass, Plus, RefreshCw, Search, FileText, CheckCircle2, 
-  Trash2, Eye, Play, UploadCloud, AlertCircle, Radio, Archive,
-  MapPin, Disc, ArrowRight, ShieldCheck, Clock, Layers, Filter, X, Database
+  Compass, Plus, Search, FileText, CheckCircle2, 
+  Trash2, UploadCloud, AlertCircle, Radio, Archive,
+  MapPin, Clock, Filter, X, Database
 } from 'lucide-react';
 import { useMission } from '../context/MissionContext';
-import { formatClassLabel } from '../utils/formatters';
 
 export default function Surveys() {
   const navigate = useNavigate();
@@ -16,7 +15,6 @@ export default function Surveys() {
     selectedMissionId, 
     setSelectedMissionId, 
     loadingMissions, 
-    refreshMissions, 
     createMission, 
     deleteMission,
     error,
@@ -193,14 +191,6 @@ export default function Surveys() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <button 
-            onClick={refreshMissions}
-            className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition"
-            title="Refresh Mission List"
-          >
-            <RefreshCw className={`w-4 h-4 ${loadingMissions ? 'animate-spin' : ''}`} />
-          </button>
-
           <button 
             onClick={handleOpenCreateModal}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition flex items-center gap-2 shadow-sm"
@@ -671,10 +661,19 @@ export default function Surveys() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition shadow-sm flex items-center gap-2"
+                  disabled={submitting || !dbStatus?.connected}
+                  className={`px-5 py-2.5 font-bold rounded-xl transition shadow-sm flex items-center gap-2 ${
+                    !dbStatus?.connected
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                  title={!dbStatus?.connected ? 'Cannot create missions while PostgreSQL is offline' : 'Register Mission'}
                 >
-                  {submitting ? 'Creating...' : 'Register Mission'}
+                  {submitting 
+                    ? 'Creating...' 
+                    : !dbStatus?.connected 
+                      ? 'PostgreSQL Disconnected' 
+                      : 'Register Mission'}
                 </button>
               </div>
             </form>

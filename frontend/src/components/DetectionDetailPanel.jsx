@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Target, CheckCircle2, XCircle, Shield, X, Layers, Clock, MapPin, Eye, AlertCircle } from 'lucide-react';
+import { Target, CheckCircle2, XCircle, X, Layers, Eye, AlertCircle } from 'lucide-react';
 import { 
   formatConfidence, 
   formatClassLabel, 
   formatSize, 
   formatCoordinates, 
   formatTimestamp, 
-  getStatusBadgeInfo,
-  normalizeStatus
+  getStatusBadgeInfo
 } from '../utils/formatters';
 
 export const DetectionDetailPanel = ({ detection, onClose, onReview }) => {

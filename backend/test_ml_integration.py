@@ -239,4 +239,11 @@ if __name__ == "__main__":
     test_batch_zip_import()
     test_human_review_and_sync()
     test_mission_export()
+
+    # Teardown test artifacts so live database is completely clean
+    from app.db.repository import repo
+    repo.clear_all()
+    for mid in ["MISSION-LIVE-01", "MISSION-BATCH-TEST", "MISSION-ZIP-TEST", "MISSION-LIVE"]:
+        repo.delete_mission(mid)
+
     print("\n=== ALL INTEGRATION TESTS PASSED SUCCESSFULLY! ===")

@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 
 class GeoreferencingService:
     """

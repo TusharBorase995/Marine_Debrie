@@ -4,8 +4,8 @@ import axios from 'axios';
 import { 
   Plus, UploadCloud, ArrowUpRight, CheckCircle2, 
   Radio, Clock, Layers, Maximize2, Check,
-  ChevronDown, ExternalLink, Activity, Database,
-  Compass, MapPin, Eye, X, AlertTriangle, ShieldCheck
+  ChevronDown, Activity, Database,
+  Compass, X, ShieldCheck
 } from 'lucide-react';
 
 import detectionService from '../services/detectionService';
@@ -17,7 +17,6 @@ import { useMission } from '../context/MissionContext';
 import { 
   formatConfidence, 
   formatClassLabel, 
-  formatSize, 
   getStatusBadgeInfo,
   normalizeStatus
 } from '../utils/formatters';

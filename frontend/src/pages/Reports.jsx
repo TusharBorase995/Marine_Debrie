@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Compass, Download, FileText, CheckCircle2, Clock, XCircle, 
-  Layers, BarChart3, Radio, ArrowUpRight, Search, RefreshCw, Trash2,
-  Archive, AlertCircle, MapPin
-} from 'lucide-react';
+import { Compass, Download, CheckCircle2, Layers } from 'lucide-react';
 import { useMission } from '../context/MissionContext';
 import exportService from '../services/exportService';
 import detectionService from '../services/detectionService';
-import { formatClassLabel, formatConfidence, formatSize } from '../utils/formatters';
 
 export const Reports = () => {
   const navigate = useNavigate();
