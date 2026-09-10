@@ -364,59 +364,101 @@ async def import_mission_batch(
         "detections": canonical_list
     }
 
+@router.get("/{mission_id}/analysis")
+def get_mission_analysis(mission_id: str):
+    """
+    GET /api/missions/{mission_id}/analysis
+    Returns the unified, deterministic statistical report analysis for live preview in the dashboard.
+    """
+    from app.db.repository import repo
+    from app.services.report_analysis_service import report_analysis_service
+
+    mission = repo.get_mission(mission_id) or db_mock.get_mission(mission_id)
+    if not mission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Mission '{mission_id}' not found")
+
+    targets = repo.get_consolidated_targets(mission_id=mission_id)
+    detections = repo.get_all_detections(mission_id=mission_id)
+
+    # Fallback to in-memory if empty
+    if not targets and not detections:
+        targets = [t for t in db_mock.targets if t.get("mission_id") == mission_id]
+        detections = db_mock.get_mission_detections(mission_id)
+
+    return report_analysis_service.analyze_mission(mission, targets, detections)
+
+
 @router.get("/{mission_id}/export")
 def export_mission(
     mission_id: str,
-    format: str = Query("json", description="Export format: 'json' or 'csv'")
+    format: str = Query("pdf", description="Export format: 'pdf' or 'excel'")
 ):
     """
-    GET /api/missions/{mission_id}/export?format=json|csv
-    Exports mission detections in CSV or JSON.
+    GET /api/missions/{mission_id}/export?format=pdf|excel
+    Generates professional operational mission reports (PDF or multi-sheet Excel).
     """
-    mission = db_mock.get_mission(mission_id)
+    from app.db.repository import repo
+    from app.services.report_analysis_service import report_analysis_service
+    from app.services.pdf_report_generator import pdf_report_generator
+    from app.services.excel_report_generator import excel_report_generator
+
+    mission = repo.get_mission(mission_id) or db_mock.get_mission(mission_id)
     if not mission:
-        raise HTTPException(status_code=404, detail=f"Mission '{mission_id}' not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Mission '{mission_id}' not found")
 
-    items = db_mock.get_mission_detections(mission_id)
+    targets = repo.get_consolidated_targets(mission_id=mission_id)
+    detections = repo.get_all_detections(mission_id=mission_id)
 
-    if format.lower() == "csv":
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            "Mission ID", "Target ID", "Classification", "Confidence (%)", "Latitude", "Longitude",
-            "Estimated Size (m)", "Shadow Verified", "Status", "Timestamp", "Sonar Image Ref"
-        ])
-        for d in items:
-            conf_val = d.get("confidence", 0)
-            conf_pct = f"{round(float(conf_val) * 100)}%"
-            writer.writerow([
-                mission_id,
-                d.get("target_id", ""),
-                d.get("class", ""),
-                conf_pct,
-                d.get("latitude", ""),
-                d.get("longitude", ""),
-                d.get("estimated_size_m", ""),
-                "Yes" if d.get("shadow_verified") else "No",
-                d.get("status", "pending_review"),
-                d.get("timestamp", ""),
-                d.get("sonar_image_ref", "")
-            ])
-        filename = f"{mission_id}_detections.csv"
-        return Response(
-            content=output.getvalue(),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+    # Fallback to in-memory if empty
+    if not targets and not detections:
+        targets = [t for t in db_mock.targets if t.get("mission_id") == mission_id]
+        detections = db_mock.get_mission_detections(mission_id)
+
+    # Single source of truth calculation
+    analysis = report_analysis_service.analyze_mission(mission, targets, detections)
+
+    fmt = (format or "").lower().strip()
+    clean_mission_name = mission.get("survey_name", mission_id).replace(" ", "_").replace("/", "_")
+
+    if fmt == "pdf":
+        try:
+            pdf_bytes = pdf_report_generator.generate_pdf(analysis)
+            filename = f"{clean_mission_name}_Operational_Report.pdf"
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Access-Control-Expose-Headers": "Content-Disposition"
+                }
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate PDF report: {str(e)}"
+            )
+
+    elif fmt in ["excel", "xlsx"]:
+        try:
+            excel_bytes = excel_report_generator.generate_excel(analysis)
+            filename = f"{clean_mission_name}_Operational_Report.xlsx"
+            return Response(
+                content=excel_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Access-Control-Expose-Headers": "Content-Disposition"
+                }
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate Excel report: {str(e)}"
+            )
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid export format '{format}'. Supported formats are 'pdf' and 'excel'."
         )
 
-    # JSON export
-    export_payload = {
-        "mission": mission,
-        "detections": items
-    }
-    filename = f"{mission_id}_detections.json"
-    return Response(
-        content=json.dumps(export_payload, indent=2),
-        media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
