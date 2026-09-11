@@ -1,4 +1,5 @@
 from typing import Dict, Any
+from app.utils.bool_utils import parse_bool
 
 class DetectionValidationService:
     """
@@ -8,7 +9,7 @@ class DetectionValidationService:
 
     def validate(self, detection: Dict[str, Any]) -> Dict[str, Any]:
         conf = detection.get("confidence", 0.85)
-        shadow_verified = detection.get("shadow_verified", True)
+        shadow_verified = parse_bool(detection.get("shadow_verified"), False)
 
         # Fusion logic
         fusion_score = round(conf * (1.02 if shadow_verified else 0.82), 2)

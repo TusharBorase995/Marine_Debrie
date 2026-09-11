@@ -238,7 +238,7 @@ export default function EvidenceViewerModal({
   const activeCoords = formatCoordinates(activeTarget?.latitude, activeTarget?.longitude);
   const activeStatusInfo = getStatusBadgeInfo(activeTarget?.status || activeTarget?.human_review_status);
   const activeTimestamp = formatTimestamp(activeTarget?.timestamp || activeTarget?.observations?.[0]?.timestamp);
-  const activeShadowVerified = activeTarget?.shadow_verified ?? activeTarget?.observations?.[0]?.shadow_verified ?? true;
+  const activeShadowVerified = Boolean(activeTarget?.shadow_verified ?? activeTarget?.observations?.[0]?.shadow_verified ?? false);
 
   // Extract filename for header
   const imageFileName = useMemo(() => {

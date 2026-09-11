@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, st
 from mock_data import db_mock
 from app.services.image_service import image_service
 from app.api.websocket import ws_manager
+from app.utils.bool_utils import parse_bool
 
 router = APIRouter(prefix="/api/ml", tags=["ML Detection Integration API"])
 
@@ -22,7 +23,7 @@ class CanonicalDetectionPayload(BaseModel):
     latitude: Optional[float] = Field(default=None, description="WGS84 latitude coordinate")
     longitude: Optional[float] = Field(default=None, description="WGS84 longitude coordinate")
     estimated_size_m: float = Field(..., description="Physical object dimension in meters")
-    shadow_verified: bool = Field(default=True, description="U-Net acoustic shadow verification status")
+    shadow_verified: bool = Field(default=False, description="U-Net acoustic shadow verification status")
     status: str = Field(default="pending_review", description="Review status (pending_review, verified, rejected)")
     timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp")
     sonar_image_ref: Optional[str] = Field(default=None, description="Path or URL to detected sonar evidence image")
@@ -60,6 +61,11 @@ class CanonicalDetectionPayload(BaseModel):
             return max(0.0, min(1.0, val))
         except (ValueError, TypeError):
             return 0.85
+
+    @field_validator("shadow_verified", mode="before")
+    @classmethod
+    def validate_shadow(cls, v):
+        return parse_bool(v, False)
 
     @field_validator("status")
     @classmethod
@@ -157,6 +163,7 @@ async def _process_single_canonical_detection(payload: CanonicalDetectionPayload
         existing_tgt["latitude"] = round(sum(valid_lats) / len(valid_lats), 6) if valid_lats else None
         existing_tgt["longitude"] = round(sum(valid_lons) / len(valid_lons), 6) if valid_lons else None
         existing_tgt["sonar_image_ref"] = evidence_image
+        existing_tgt["shadow_verified"] = payload.shadow_verified
         if payload.bounding_box:
             existing_tgt["bounding_box"] = payload.bounding_box
         if payload.segmentation:
@@ -173,6 +180,7 @@ async def _process_single_canonical_detection(payload: CanonicalDetectionPayload
             "latitude": round(payload.latitude, 6) if payload.latitude is not None else None,
             "longitude": round(payload.longitude, 6) if payload.longitude is not None else None,
             "estimated_size_m": round(payload.estimated_size_m, 1),
+            "shadow_verified": payload.shadow_verified,
             "status": payload.status,
             "human_review_status": payload.status,
             "confidence": round(payload.confidence, 2),
@@ -268,7 +276,7 @@ async def ingest_detection_with_image(
     latitude: float = Form(...),
     longitude: float = Form(...),
     estimated_size_m: float = Form(...),
-    shadow_verified: bool = Form(True),
+    shadow_verified: Any = Form(False),
     status_str: str = Form("pending_review", alias="status"),
     timestamp: Optional[str] = Form(None),
     bounding_box: Optional[str] = Form(None),
@@ -290,7 +298,7 @@ async def ingest_detection_with_image(
         latitude=latitude,
         longitude=longitude,
         estimated_size_m=estimated_size_m,
-        shadow_verified=shadow_verified,
+        shadow_verified=parse_bool(shadow_verified, False),
         status=status_str,
         timestamp=timestamp,
         sonar_image_ref=image_url,
@@ -340,7 +348,7 @@ async def ingest_batch_detections(payload: Union[Dict[str, Any], List[Any]], x_u
                 latitude=float(raw_lat) if raw_lat is not None else None,
                 longitude=float(raw_lon) if raw_lon is not None else None,
                 estimated_size_m=float(item.get("estimated_size_m", 3.0)),
-                shadow_verified=bool(item.get("shadow_verified", True)),
+                shadow_verified=parse_bool(item.get("shadow_verified"), False),
                 status=str(item.get("status", "pending_review")),
                 timestamp=item.get("timestamp"),
                 sonar_image_ref=item.get("sonar_image_ref") or top_level_image,

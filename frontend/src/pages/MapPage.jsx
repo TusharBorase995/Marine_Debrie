@@ -32,7 +32,7 @@ export default function MapPage() {
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('ALL');
-  const [minConfidence, setMinConfidence] = useState(0.5);
+  const [minConfidence, setMinConfidence] = useState(0.0);
 
   const { data: wsData } = useWebSocket('/ws/live-feed');
 

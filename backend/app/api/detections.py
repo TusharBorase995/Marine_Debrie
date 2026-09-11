@@ -21,7 +21,7 @@ class CanonicalDetectionInput(BaseModel):
     latitude: Optional[float] = 32.6500
     longitude: Optional[float] = -117.5500
     estimated_size_m: Optional[float] = 3.0
-    shadow_verified: Optional[bool] = True
+    shadow_verified: Optional[bool] = False
     status: Optional[str] = "pending_review"
     timestamp: Optional[str] = None
     sonar_image_ref: Optional[str] = None

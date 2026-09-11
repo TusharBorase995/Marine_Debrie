@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from mock_data import db_mock
 from app.services.image_service import image_service
 from app.api.websocket import ws_manager
+from app.utils.bool_utils import parse_bool
 
 router = APIRouter(prefix="/api/missions", tags=["Mission Management API"])
 
@@ -83,7 +84,7 @@ def normalize_detection_item(item: dict, mission_id: str, default_image_ref: Opt
         "latitude": round(lat, 6),
         "longitude": round(lon, 6),
         "estimated_size_m": round(size, 1),
-        "shadow_verified": bool(item.get("shadow_verified", True)),
+        "shadow_verified": parse_bool(item.get("shadow_verified"), False),
         "status": stat,
         "human_review_status": stat,
         "timestamp": ts,
@@ -107,6 +108,7 @@ def consolidate_target_record(canonical: dict):
         if not any(o.get("id") == canonical["id"] for o in existing_tgt.get("observations", [])):
             existing_tgt["observations"].append(canonical)
         existing_tgt["observation_count"] = len(existing_tgt["observations"])
+        existing_tgt["shadow_verified"] = canonical.get("shadow_verified", False)
         
         # Fused multi-pass confidence
         obs_confs = [d.get("confidence", 0.85) for d in existing_tgt["observations"]]
@@ -134,6 +136,7 @@ def consolidate_target_record(canonical: dict):
             "latitude": canonical["latitude"],
             "longitude": canonical["longitude"],
             "estimated_size_m": canonical["estimated_size_m"],
+            "shadow_verified": canonical.get("shadow_verified", False),
             "status": canonical["status"],
             "human_review_status": canonical["status"],
             "confidence": canonical["confidence"],

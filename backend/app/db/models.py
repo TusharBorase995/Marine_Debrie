@@ -131,6 +131,7 @@ class TargetModel(Base):
     bounding_box = Column(JSON, nullable=True)
     segmentation = Column(JSON, nullable=True)
     mask_ref = Column(String(512), nullable=True)
+    shadow_verified = Column(Boolean, default=False, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -143,6 +144,9 @@ class TargetModel(Base):
         obs_dicts = [obs.to_dict() for obs in (self.observations or [])]
         image_url = f"/api/images/{self.image_id}" if self.image_id else self.sonar_image_ref
         latest_obs = obs_dicts[-1] if obs_dicts else {}
+        shadow_val = self.shadow_verified
+        if shadow_val is None:
+            shadow_val = latest_obs.get("shadow_verified")
         return {
             "target_id": self.target_id,
             "id": self.target_id,  # Compatibility alias
@@ -157,6 +161,7 @@ class TargetModel(Base):
             "estimated_size_m": round(self.estimated_size_m, 1),
             "confidence": round(self.fused_confidence, 2),
             "fused_confidence": round(self.fused_confidence, 2),
+            "shadow_verified": bool(shadow_val) if shadow_val is not None else False,
             "status": self.status,
             "human_review_status": self.status,
             "sonar_image_ref": image_url,
@@ -189,7 +194,7 @@ class ObservationModel(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     estimated_size_m = Column(Float, default=3.0)
-    shadow_verified = Column(Boolean, default=True)
+    shadow_verified = Column(Boolean, default=False)
     status = Column(String(32), default="pending_review")
     bounding_box = Column(JSON, nullable=True)
     segmentation = Column(JSON, nullable=True)
@@ -217,7 +222,7 @@ class ObservationModel(Base):
             "latitude": round(self.latitude, 6) if self.latitude is not None else None,
             "longitude": round(self.longitude, 6) if self.longitude is not None else None,
             "estimated_size_m": round(self.estimated_size_m, 1),
-            "shadow_verified": self.shadow_verified,
+            "shadow_verified": bool(self.shadow_verified) if self.shadow_verified is not None else False,
             "status": self.status,
             "human_review_status": self.status,
             "bounding_box": self.bounding_box,

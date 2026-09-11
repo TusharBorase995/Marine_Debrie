@@ -50,7 +50,7 @@ export default function Detections() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [missionFilter, setMissionFilter] = useState('ALL');
   const [shadowFilter, setShadowFilter] = useState('ALL'); // 'ALL' | 'VERIFIED' | 'UNVERIFIED'
-  const [minConfidence, setMinConfidence] = useState(0.5);
+  const [minConfidence, setMinConfidence] = useState(0.0);
   const [sortBy, setSortBy] = useState('confidence_desc');
 
   // Selected Target for Detailed Inspection View
@@ -171,7 +171,7 @@ export default function Detections() {
     setStatusFilter('ALL');
     setMissionFilter('ALL');
     setShadowFilter('ALL');
-    setMinConfidence(0.5);
+    setMinConfidence(0.0);
     setSortBy('confidence_desc');
   };
 
@@ -227,7 +227,7 @@ export default function Detections() {
 
         // 5. Shadow Verification Filter
         if (shadowFilter !== 'ALL') {
-          const shadowVerified = Boolean(t.shadow_verified ?? t.observations?.[0]?.shadow_verified ?? true);
+          const shadowVerified = Boolean(t.shadow_verified ?? t.observations?.[0]?.shadow_verified ?? false);
           if (shadowFilter === 'VERIFIED' && !shadowVerified) return false;
           if (shadowFilter === 'UNVERIFIED' && shadowVerified) return false;
         }
@@ -264,7 +264,7 @@ export default function Detections() {
             Acoustic Detections
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5">
-            Review and ground-truth detected targets and acoustic anomalies.
+            Review and ground-truth detected targets and acoustic anomalies. Showing {processedTargets.length} target{processedTargets.length === 1 ? '' : 's'}{processedTargets.length !== targets.length ? ` (filtered from ${targets.length} total)` : ''}.
           </p>
         </div>
 
@@ -479,7 +479,7 @@ export default function Detections() {
                       const statusInfo = getStatusBadgeInfo(tgt.status || tgt.human_review_status);
                       const imageSrc = tgt.sonar_image_ref || null;
                       const timestampStr = formatTimestamp(tgt.timestamp || tgt.observations?.[0]?.timestamp);
-                      const shadowVerified = tgt.shadow_verified ?? tgt.observations?.[0]?.shadow_verified ?? true;
+                      const shadowVerified = Boolean(tgt.shadow_verified ?? tgt.observations?.[0]?.shadow_verified ?? false);
 
                       return (
                         <tr

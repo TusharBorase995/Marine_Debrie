@@ -8,6 +8,7 @@ from app.db.database import SessionLocal, engine, Base
 import hashlib
 import secrets
 from app.db.models import MissionModel, TargetModel, ObservationModel, SonarImageModel, UserModel
+from app.utils.bool_utils import parse_bool
 
 logger = logging.getLogger("sonar_repository")
 
@@ -44,6 +45,8 @@ def init_tables():
                     conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS bounding_box JSON;"))
                 if "image_id" not in columns:
                     conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS image_id VARCHAR(64);"))
+                if "shadow_verified" not in columns:
+                    conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS shadow_verified BOOLEAN DEFAULT FALSE;"))
                 conn.commit()
 
             if inspector.has_table("sonar_images"):
@@ -563,6 +566,8 @@ class SonarRepository:
                 elif target_uid and not m_record.user_id:
                     m_record.user_id = target_uid
 
+            shadow_status = parse_bool(det.get("shadow_verified"), False)
+
             # Check for existing parent target
             target = session.query(TargetModel).filter(TargetModel.target_id == target_id).first()
             if not target:
@@ -577,6 +582,7 @@ class SonarRepository:
                     longitude=lon,
                     estimated_size_m=size,
                     fused_confidence=conf,
+                    shadow_verified=shadow_status,
                     status=stat,
                     sonar_image_ref=img_ref,
                     bounding_box=det.get("bounding_box"),
@@ -589,6 +595,8 @@ class SonarRepository:
             else:
                 if target_uid and not target.user_id:
                     target.user_id = target_uid
+                if "shadow_verified" in det and det.get("shadow_verified") is not None:
+                    target.shadow_verified = shadow_status
                 # Target exists: recalculate pass count and centroid
                 existing_obs = session.query(ObservationModel).filter(ObservationModel.target_id == target_id).all()
                 pass_num = len(existing_obs) + 1
@@ -626,7 +634,7 @@ class SonarRepository:
                 obs.latitude = lat
                 obs.longitude = lon
                 obs.estimated_size_m = size
-                obs.shadow_verified = bool(det.get("shadow_verified", True))
+                obs.shadow_verified = shadow_status
                 obs.status = stat
                 obs.bounding_box = det.get("bounding_box")
                 obs.segmentation = det.get("segmentation")
@@ -647,7 +655,7 @@ class SonarRepository:
                     latitude=lat,
                     longitude=lon,
                     estimated_size_m=size,
-                    shadow_verified=bool(det.get("shadow_verified", True)),
+                    shadow_verified=shadow_status,
                     status=stat,
                     bounding_box=det.get("bounding_box"),
                     segmentation=det.get("segmentation"),

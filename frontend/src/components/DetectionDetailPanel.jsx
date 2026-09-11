@@ -55,7 +55,7 @@ export const DetectionDetailPanel = ({
   const lonVal = currentObs.longitude ?? detection.longitude;
   const displayCoords = formatCoordinates(latVal, lonVal);
 
-  const shadowVerified = currentObs.shadow_verified ?? detection.shadow_verified ?? true;
+  const shadowVerified = Boolean(currentObs?.shadow_verified ?? detection?.shadow_verified ?? false);
   const displayTimestamp = formatTimestamp(currentObs.timestamp || detection.timestamp);
 
   // Prioritize local optimistic status, then parent target status, then observation status

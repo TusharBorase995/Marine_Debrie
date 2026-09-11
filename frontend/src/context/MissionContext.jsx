@@ -190,6 +190,7 @@ export const MissionProvider = ({ children }) => {
           updated.confidence = newDet.confidence;
           updated.fused_confidence = newDet.confidence;
           updated.sonar_image_ref = newDet.sonar_image_ref || updated.sonar_image_ref;
+          updated.shadow_verified = Boolean(newDet.shadow_verified);
           const copy = [...prev];
           copy[existingIdx] = updated;
           return copy;
@@ -203,6 +204,7 @@ export const MissionProvider = ({ children }) => {
             latitude: newDet.latitude,
             longitude: newDet.longitude,
             estimated_size_m: newDet.estimated_size_m,
+            shadow_verified: Boolean(newDet.shadow_verified),
             status: newDet.status || 'pending_review',
             human_review_status: newDet.status || 'pending_review',
             confidence: newDet.confidence,
