@@ -70,36 +70,6 @@ export const consolidateDetectionsToTargets = (detections = []) => {
   return consolidated;
 };
 
-export const targetService = {
-  async getAll(params = {}) {
-    try {
-      const res = await axios.get(API_BASE, { params });
-      return res.data;
-    } catch (err) {
-      console.warn('Falling back to client-side target consolidation from /api/detections:', err);
-      const detRes = await axios.get('/api/detections', { params });
-      return consolidateDetectionsToTargets(detRes.data);
-    }
-  },
-
-  async getById(targetId) {
-    const res = await axios.get(`${API_BASE}/${targetId}`);
-    return res.data;
-  },
-
-  async review(targetId, action) {
-    const res = await axios.post(`${API_BASE}/${targetId}/review`, { action });
-    return res.data;
-  },
-
-  async reviewTarget(targetId, action) {
-    return this.review(targetId, action);
-  },
-
-  consolidateDetectionsToTargets,
-  extractImageKeys
-};
-
 /**
  * Normalizes and extracts all acoustic frame identifiers from a target or observation.
  * Matches across multi-pass sonar frames, image IDs, and relative paths.
@@ -130,4 +100,35 @@ export const extractImageKeys = (tgt) => {
   return Array.from(keys);
 };
 
+export const targetService = {
+  async getAll(params = {}) {
+    try {
+      const res = await axios.get(API_BASE, { params });
+      return res.data;
+    } catch (err) {
+      console.warn('Falling back to client-side target consolidation from /api/detections:', err);
+      const detRes = await axios.get('/api/detections', { params });
+      return consolidateDetectionsToTargets(detRes.data);
+    }
+  },
+
+  async getById(targetId) {
+    const res = await axios.get(`${API_BASE}/${targetId}`);
+    return res.data;
+  },
+
+  async review(targetId, action) {
+    const res = await axios.post(`${API_BASE}/${targetId}/review`, { action });
+    return res.data;
+  },
+
+  async reviewTarget(targetId, action) {
+    return this.review(targetId, action);
+  },
+
+  consolidateDetectionsToTargets,
+  extractImageKeys
+};
+
 export default targetService;
+
