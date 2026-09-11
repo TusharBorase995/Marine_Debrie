@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, ZoomIn, ZoomOut, RotateCcw, 
   AlertCircle, CheckCircle2, XCircle, 
@@ -206,8 +207,8 @@ export default function EvidenceViewerModal({
     return parts[parts.length - 1] || 'Sonar Frame';
   }, [activeImageRef]);
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[2000] p-3 sm:p-6 select-none animate-arrival">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-3 sm:p-6 select-none animate-arrival">
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-7xl h-[92vh] flex flex-col overflow-hidden text-slate-800">
         
         {/* Top Header Console Bar */}
@@ -713,6 +714,7 @@ export default function EvidenceViewerModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

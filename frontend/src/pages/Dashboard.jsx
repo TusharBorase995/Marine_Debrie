@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
@@ -11,6 +12,7 @@ import {
 import detectionService from '../services/detectionService';
 import targetService from '../services/targetService';
 import DetectionDetailPanel from '../components/DetectionDetailPanel';
+import EvidenceViewerModal from '../components/EvidenceViewerModal';
 import GISMap from '../components/GISMap';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useMission } from '../context/MissionContext';
@@ -39,6 +41,7 @@ export default function Dashboard() {
   const [lastUpdatedTime, setLastUpdatedTime] = useState('');
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [isEvidenceModalOpen, setIsEvidenceModalOpen] = useState(false);
   const [newlyDetectedId, setNewlyDetectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activityTimeframe, setActivityTimeframe] = useState('7d');
@@ -343,6 +346,21 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error("Review action failed:", err);
+    }
+  };
+
+  const handleDeleteTarget = async (targetId) => {
+    if (window.confirm(`Are you sure you want to permanently delete target ${targetId}?`)) {
+      try {
+        await detectionService.delete(targetId);
+        setTargets(prev => prev.filter(t => (t.target_id || t.id) !== targetId));
+        setDetections(prev => prev.filter(d => (d.target_id || d.id) !== targetId));
+        setShowDetailModal(false);
+        setSelectedTarget(null);
+      } catch (err) {
+        console.error("Failed to delete target:", err);
+        alert("Failed to delete target: " + (err.response?.data?.detail || err.message));
+      }
     }
   };
 
@@ -950,35 +968,59 @@ export default function Dashboard() {
 
       </div>
 
-      {/* Target Inspection Modal Dialog (preserves full ground-truthing functionality) */}
-      {showDetailModal && selectedTarget && (
-        <div className="fixed inset-0 bg-[#0B192C]/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-[#E5EDF5] overflow-hidden animate-arrival relative max-h-[90vh] flex flex-col">
-            <div className="p-4 border-b border-[#E5EDF5] flex items-center justify-between bg-[#F4F7FB]">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#0284C7]" />
-                <h3 className="text-sm font-black text-[#0B192C]">
-                  Acoustic Target Inspection — {selectedTarget.target_id || selectedTarget.id}
-                </h3>
-              </div>
-              <button 
-                onClick={() => setShowDetailModal(false)}
-                className="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center text-[#64748B] transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto">
-              <DetectionDetailPanel 
-                detection={selectedTarget}
-                onReview={(id, action) => {
-                  handleReview(id, action);
-                }}
-                onClose={() => setShowDetailModal(false)}
-              />
-            </div>
+      {/* Target Inspection Modal Dialog (rendered via Portal with z-[9999] to completely dim topbar and page) */}
+      {showDetailModal && selectedTarget && createPortal(
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 select-none animate-in fade-in duration-200"
+          onClick={() => setShowDetailModal(false)}
+        >
+          <div 
+            className="max-w-xl w-full max-h-[92vh] overflow-y-auto rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DetectionDetailPanel 
+              detection={selectedTarget}
+              onReview={(id, action) => {
+                handleReview(id, action);
+              }}
+              onClose={() => setShowDetailModal(false)}
+              onOpenEvidence={() => setIsEvidenceModalOpen(true)}
+              onDelete={handleDeleteTarget}
+              onViewOnMap={() => {
+                setSelectedTargetId(selectedTarget.target_id || selectedTarget.id);
+                navigate('/map');
+              }}
+            />
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* High-Res Sonar Evidence Modal Dialog */}
+      {isEvidenceModalOpen && selectedTarget && createPortal(
+        <EvidenceViewerModal
+          target={selectedTarget}
+          allTargets={targets}
+          onClose={() => setIsEvidenceModalOpen(false)}
+          onTargetSelect={(t) => {
+            setSelectedTarget(t);
+            setSelectedTargetId(t.target_id || t.id);
+          }}
+          onTargetReviewed={(tid, newStatus) => {
+            setTargets(prev => prev.map(t => (t.target_id === tid || t.id === tid) ? { ...t, status: newStatus, human_review_status: newStatus } : t));
+            if (selectedTarget && (selectedTarget.target_id === tid || selectedTarget.id === tid)) {
+              setSelectedTarget(prev => ({ ...prev, status: newStatus, human_review_status: newStatus }));
+            }
+          }}
+          onTargetDeleted={(tid) => {
+            setTargets(prev => prev.filter(t => (t.target_id || t.id) !== tid));
+            setDetections(prev => prev.filter(d => (d.target_id || d.id) !== tid));
+            setShowDetailModal(false);
+            setSelectedTarget(null);
+            setIsEvidenceModalOpen(false);
+          }}
+        />,
+        document.body
       )}
 
     </div>

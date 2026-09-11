@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Target, CheckCircle2, XCircle, RefreshCw, 
@@ -892,9 +893,9 @@ export default function Detections() {
       )}
 
       {/* Premium Delete Confirmation Modal */}
-      {deleteConfirmTarget && (
+      {deleteConfirmTarget && createPortal(
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150 select-none"
           onClick={() => !deleteLoading && setDeleteConfirmTarget(null)}
         >
           <div 
@@ -968,7 +969,8 @@ export default function Detections() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Floating Success Toast */}
