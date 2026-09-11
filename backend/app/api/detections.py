@@ -25,8 +25,8 @@ class CanonicalDetectionInput(BaseModel):
     status: Optional[str] = "pending_review"
     timestamp: Optional[str] = None
     sonar_image_ref: Optional[str] = None
-    bounding_box: Optional[Dict[str, Any]] = None
-    segmentation: Optional[List[List[Union[float, int]]]] = None
+    bounding_box: Optional[Union[Dict[str, Any], List[Any], str]] = None
+    segmentation: Optional[Union[List[Any], str]] = None
     mask_ref: Optional[str] = None
     mission_id: Optional[str] = "MISSION-LIVE"
 
@@ -175,7 +175,7 @@ async def create_detection(request: Request):
     # Support batch list or combined frame detections if sent directly to /api/detections
     if isinstance(body, list) or (isinstance(body, dict) and "detections" in body):
         from app.api.ml_integration import ingest_batch_detections
-        return await ingest_batch_detections(body)
+        return await ingest_batch_detections(body, x_user_id=req_user_id)
 
     if not isinstance(body, dict) or not body:
         raise HTTPException(status_code=400, detail="Missing detection payload. Send 'detection' JSON or form fields.")

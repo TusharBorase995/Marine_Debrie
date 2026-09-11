@@ -296,12 +296,54 @@ export default function EvidenceViewerModal({
                       const isActive = tid === activeTargetId;
                       const isHovered = tid === hoveredTargetId;
 
-                      const segmentation = tgt.segmentation || tgt.observations?.[0]?.segmentation;
-                      const boundingBox = tgt.bounding_box || tgt.observations?.[0]?.bounding_box;
+                      let segmentation = tgt.segmentation || tgt.observations?.[0]?.segmentation;
+                      if (typeof segmentation === 'string') {
+                        try { segmentation = JSON.parse(segmentation); } catch (_) {}
+                      }
+                      let rawBBox = tgt.bounding_box || tgt.observations?.[0]?.bounding_box;
+                      if (typeof rawBBox === 'string') {
+                        try { rawBBox = JSON.parse(rawBBox); } catch (_) {}
+                      }
+
+                      // Resolve box dimensions whether provided as {x, y, width, height}, {xmin, ymin, xmax, ymax}, or array [x,y,w,h]
+                      let parsedBox = null;
+                      if (rawBBox) {
+                        let bx = rawBBox.x ?? rawBBox.xmin ?? rawBBox.left;
+                        let by = rawBBox.y ?? rawBBox.ymin ?? rawBBox.top;
+                        let bw = rawBBox.width ?? rawBBox.w;
+                        let bh = rawBBox.height ?? rawBBox.h;
+
+                        if (bx === undefined && rawBBox.xmax !== undefined && rawBBox.xmin !== undefined) {
+                          bx = rawBBox.xmin;
+                          bw = rawBBox.xmax - rawBBox.xmin;
+                        }
+                        if (by === undefined && rawBBox.ymax !== undefined && rawBBox.ymin !== undefined) {
+                          by = rawBBox.ymin;
+                          bh = rawBBox.ymax - rawBBox.ymin;
+                        }
+
+                        if (Array.isArray(rawBBox) && rawBBox.length >= 4) {
+                          bx = rawBBox[0];
+                          by = rawBBox[1];
+                          bw = rawBBox[2];
+                          bh = rawBBox[3];
+                        }
+
+                        if (typeof bx === 'number' && typeof by === 'number' && typeof bw === 'number' && typeof bh === 'number') {
+                          // Scale normalized coordinates [0..1] to native image resolution
+                          if (bx <= 1 && by <= 1 && bw <= 1 && bh <= 1 && naturalDim.width > 1 && naturalDim.height > 1) {
+                            bx = Math.round(bx * naturalDim.width);
+                            by = Math.round(by * naturalDim.height);
+                            bw = Math.round(bw * naturalDim.width);
+                            bh = Math.round(bh * naturalDim.height);
+                          }
+                          parsedBox = { x: bx, y: by, width: bw, height: bh };
+                        }
+                      }
 
                       // Prefer segmentation polygon if valid points (>= 3 points)
                       const hasPolygon = Array.isArray(segmentation) && segmentation.length >= 3;
-                      const hasBox = boundingBox && typeof boundingBox.x === 'number' && typeof boundingBox.y === 'number';
+                      const hasBox = parsedBox !== null;
 
                       // If neither exists, do NOT invent fake overlay
                       if (!hasPolygon && !hasBox) {
@@ -325,8 +367,8 @@ export default function EvidenceViewerModal({
                         labelX = Math.min(...xs);
                         labelY = Math.min(...ys);
                       } else if (hasBox) {
-                        labelX = boundingBox.x;
-                        labelY = boundingBox.y;
+                        labelX = parsedBox.x;
+                        labelY = parsedBox.y;
                       }
 
                       return (
@@ -354,10 +396,10 @@ export default function EvidenceViewerModal({
                           ) : (
                             /* 2. Bounding Box Fallback */
                             <rect
-                              x={boundingBox.x}
-                              y={boundingBox.y}
-                              width={boundingBox.width}
-                              height={boundingBox.height}
+                              x={parsedBox.x}
+                              y={parsedBox.y}
+                              width={parsedBox.width}
+                              height={parsedBox.height}
                               rx="4"
                               stroke={strokeColor}
                               strokeWidth={strokeWidth}

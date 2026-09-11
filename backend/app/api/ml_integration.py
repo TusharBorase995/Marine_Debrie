@@ -26,9 +26,31 @@ class CanonicalDetectionPayload(BaseModel):
     status: str = Field(default="pending_review", description="Review status (pending_review, verified, rejected)")
     timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp")
     sonar_image_ref: Optional[str] = Field(default=None, description="Path or URL to detected sonar evidence image")
-    bounding_box: Optional[Dict[str, Any]] = Field(default=None, description="Optional bounding box coordinates {x, y, width, height}")
-    segmentation: Optional[List[List[Union[float, int]]]] = Field(default=None, description="Polygon points [[x, y], ...]")
+    bounding_box: Optional[Union[Dict[str, Any], List[Any], str]] = Field(default=None, description="Optional bounding box coordinates {x, y, width, height} or array [x,y,w,h]")
+    segmentation: Optional[Union[List[Any], str]] = Field(default=None, description="Polygon points [[x, y], ...]")
     mask_ref: Optional[str] = Field(default=None, description="Optional segmentation mask reference")
+
+    @field_validator("bounding_box", mode="before")
+    @classmethod
+    def parse_bbox(cls, v):
+        if isinstance(v, str) and v.strip().startswith(("{", "[")):
+            try:
+                import json
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
+
+    @field_validator("segmentation", mode="before")
+    @classmethod
+    def parse_segmentation(cls, v):
+        if isinstance(v, str) and v.strip().startswith("["):
+            try:
+                import json
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
 
     @field_validator("confidence")
     @classmethod
@@ -249,6 +271,8 @@ async def ingest_detection_with_image(
     shadow_verified: bool = Form(True),
     status_str: str = Form("pending_review", alias="status"),
     timestamp: Optional[str] = Form(None),
+    bounding_box: Optional[str] = Form(None),
+    segmentation: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
@@ -269,7 +293,9 @@ async def ingest_detection_with_image(
         shadow_verified=shadow_verified,
         status=status_str,
         timestamp=timestamp,
-        sonar_image_ref=image_url
+        sonar_image_ref=image_url,
+        bounding_box=bounding_box,
+        segmentation=segmentation
     )
     return await ingest_ml_detection(payload, x_user_id=x_user_id)
 
@@ -284,7 +310,7 @@ async def simulate_ml_detection():
     )
 
 @router.post("/batch", status_code=status.HTTP_201_CREATED)
-async def ingest_batch_detections(payload: Dict[str, Any]):
+async def ingest_batch_detections(payload: Union[Dict[str, Any], List[Any]], x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """
     POST /api/ml/batch — Ingests a batch JSON containing an array of detection objects.
     Accepts format:
@@ -301,7 +327,7 @@ async def ingest_batch_detections(payload: Dict[str, Any]):
     top_level_image = payload.get("sonar_image_ref") if isinstance(payload, dict) else None
     from app.db.repository import repo
     specified_mission = (payload.get("mission_id") or payload.get("survey_id")) if isinstance(payload, dict) else None
-    default_mission = repo.resolve_target_mission(specified_mission, ingestion_mode="batch")
+    default_mission = repo.resolve_target_mission(specified_mission, ingestion_mode="batch", user_id=x_user_id)
     results = []
     for item in det_list:
         try:
@@ -323,7 +349,7 @@ async def ingest_batch_detections(payload: Dict[str, Any]):
                 mask_ref=item.get("mask_ref")
             )
             item_mission = item.get("mission_id") or default_mission
-            res = await _process_single_canonical_detection(canonical, mission_id=item_mission)
+            res = await _process_single_canonical_detection(canonical, mission_id=item_mission, user_id=x_user_id)
             results.append(res["detection"])
         except Exception as ex:
             print(f"[Batch Ingestion Warning] Skipping item: {ex}")
