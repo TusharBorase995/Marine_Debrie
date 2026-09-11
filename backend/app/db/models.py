@@ -7,15 +7,16 @@ from app.db.database import Base
 
 class SonarImageModel(Base):
     """
-    SQLAlchemy model for Binary Image Storage in PostgreSQL (BYTEA column).
-    Stores raw binary sonar image bytes (PNG/JPEG) directly in the database.
+    SQLAlchemy model for Sonar Evidence Images.
+    Stores metadata and points to actual image stored in Neon Object Storage (sagar-images bucket).
     """
     __tablename__ = "sonar_images"
 
     image_id = Column(String(64), primary_key=True, index=True)
     filename = Column(String(255), nullable=False)
     mime_type = Column(String(64), default="image/png", nullable=False)
-    image_bytes = Column(LargeBinary, nullable=False)
+    storage_key = Column(String(512), nullable=True)  # S3 Key in Neon Object Storage (sagar-images)
+    image_bytes = Column(LargeBinary, nullable=True)   # Retained for backward-compatibility
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
@@ -23,6 +24,7 @@ class SonarImageModel(Base):
             "image_id": self.image_id,
             "filename": self.filename,
             "mime_type": self.mime_type,
+            "storage_key": self.storage_key,
             "size_bytes": len(self.image_bytes) if self.image_bytes else 0,
             "url": f"/api/images/{self.image_id}",
             "created_at": self.created_at.isoformat() if self.created_at else None

@@ -47,8 +47,7 @@ backend/.env
 *.env.*.local
 
 # Generated dynamic uploads from test runs
-backend/uploads/detections/TGT-POSTMAN-*
-backend/uploads/detections/TGT-TEST-*
+backend/uploads/
 
 # IDE & Editors
 .vscode/
@@ -62,3 +61,4 @@ backend/uploads/detections/TGT-TEST-*
 .DS_Store
 Thumbs.db
 desktop.ini
+.neon

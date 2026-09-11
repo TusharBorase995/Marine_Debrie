@@ -26,6 +26,12 @@ def init_tables():
                     conn.execute(text("ALTER TABLE targets ADD COLUMN IF NOT EXISTS image_id VARCHAR(64);"))
                 conn.commit()
 
+            if inspector.has_table("sonar_images"):
+                s_columns = [c["name"] for c in inspector.get_columns("sonar_images")]
+                if "storage_key" not in s_columns:
+                    conn.execute(text("ALTER TABLE sonar_images ADD COLUMN IF NOT EXISTS storage_key VARCHAR(512);"))
+                conn.commit()
+
             if inspector.has_table("missions"):
                 m_columns = [c["name"] for c in inspector.get_columns("missions")]
                 if "is_active" not in m_columns:
@@ -40,7 +46,7 @@ def init_tables():
 class SonarRepository:
     """
     Data Access Repository for Hydrographic Survey System.
-    Handles persistence in PostgreSQL database.
+    Handles persistence in PostgreSQL database and Neon Object Storage (sagar-images).
     """
 
     @staticmethod
@@ -49,7 +55,16 @@ class SonarRepository:
 
     @classmethod
     def save_sonar_image(cls, image_id: str, filename: str, mime_type: str, raw_bytes: bytes) -> SonarImageModel:
-        """Saves binary image payload (PNG/JPEG byte stream) directly into PostgreSQL BYTEA storage."""
+        """
+        Saves sonar image into Neon Object Storage ('sagar-images' private bucket)
+        and persists metadata into Neon PostgreSQL.
+        """
+        from app.services.s3_storage import s3_storage
+
+        # S3 object key in sagar-images
+        storage_key = f"images/{image_id}_{filename}"
+        s3_key = s3_storage.upload_file(raw_bytes, storage_key, mime_type=mime_type)
+
         with cls.get_session() as session:
             img = session.query(SonarImageModel).filter(SonarImageModel.image_id == image_id).first()
             if not img:
@@ -57,22 +72,48 @@ class SonarRepository:
                     image_id=image_id,
                     filename=filename,
                     mime_type=mime_type,
-                    image_bytes=raw_bytes
+                    storage_key=s3_key or storage_key,
+                    image_bytes=None  # Image binary lives in Neon Object Storage
                 )
                 session.add(img)
             else:
                 img.filename = filename
                 img.mime_type = mime_type
-                img.image_bytes = raw_bytes
+                img.storage_key = s3_key or storage_key
             session.commit()
             session.refresh(img)
             return img
 
     @classmethod
     def get_sonar_image(cls, image_id: str) -> Optional[SonarImageModel]:
-        """Retrieves binary image record from PostgreSQL storage by image_id."""
+        """Retrieves sonar image record from PostgreSQL database by image_id."""
         with cls.get_session() as session:
             return session.query(SonarImageModel).filter(SonarImageModel.image_id == image_id).first()
+
+    @classmethod
+    def get_sonar_image_bytes(cls, image_id: str) -> Optional[tuple]:
+        """
+        Retrieves binary image data from Neon Object Storage (or fallback BYTEA).
+        Returns tuple: (bytes_data, filename, mime_type)
+        """
+        from app.services.s3_storage import s3_storage
+
+        with cls.get_session() as session:
+            img = session.query(SonarImageModel).filter(SonarImageModel.image_id == image_id).first()
+            if not img:
+                return None
+
+            # 1. Fetch from Neon Object Storage if storage_key is present
+            if img.storage_key:
+                s3_data = s3_storage.download_file(img.storage_key)
+                if s3_data:
+                    return (s3_data, img.filename, img.mime_type or "image/png")
+
+            # 2. Fallback to BYTEA in PostgreSQL if present
+            if img.image_bytes:
+                return (img.image_bytes, img.filename, img.mime_type or "image/png")
+
+            return None
 
     @classmethod
     def purge_all_data(cls):

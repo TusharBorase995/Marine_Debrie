@@ -149,17 +149,20 @@ async def create_detection(request: Request):
             saved_filename = f"{safe_tid}_{ts_token}_{uuid.uuid4().hex[:6]}{ext}"
             filepath = os.path.join(DETECTIONS_UPLOAD_DIR, saved_filename)
 
-            with open(filepath, "wb") as f:
-                f.write(img_bytes)
+            try:
+                with open(filepath, "wb") as f:
+                    f.write(img_bytes)
+            except Exception:
+                pass
 
-            image_url = f"/uploads/detections/{saved_filename}"
             image_id = f"IMG-{safe_tid}-{ts_token}"
+            image_url = f"/api/images/{image_id}"
             mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
 
             try:
                 SonarRepository.save_sonar_image(image_id, saved_filename, mime_type, img_bytes)
             except Exception as e:
-                print(f"[DB] Image save warning: {e}")
+                print(f"[Neon Storage] Image save error: {e}")
 
             if isinstance(body, dict):
                 body["sonar_image_ref"] = image_url
