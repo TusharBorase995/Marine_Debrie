@@ -476,7 +476,8 @@ def export_mission(
     analysis = report_analysis_service.analyze_mission(mission, targets, detections)
 
     fmt = (format or "").lower().strip()
-    clean_mission_name = mission.get("survey_name", mission_id).replace(" ", "_").replace("/", "_")
+    raw_name = mission.get("survey_name") or mission_id
+    clean_mission_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(raw_name).replace("—", "-").replace("–", "-").replace(" ", "_")).strip("_") or mission_id
 
     if fmt == "pdf":
         try:
@@ -498,7 +499,7 @@ def export_mission(
 
     elif fmt in ["excel", "xlsx"]:
         try:
-            excel_bytes = excel_report_generator.generate_excel(analysis)
+            excel_bytes = excel_report_generator.generate_excel(analysis, detections=detections)
             filename = f"{clean_mission_name}_Operational_Report.xlsx"
             return Response(
                 content=excel_bytes,

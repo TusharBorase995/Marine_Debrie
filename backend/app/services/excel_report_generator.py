@@ -1,440 +1,417 @@
 import io
-from typing import Dict, Any, List
+import json
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.chart import BarChart, PieChart, Reference
+
 
 class ExcelReportGenerator:
     """
-    Professional 10-Sheet Operational Mission Excel Workbook Generator.
-    Uses openpyxl with native styling, number formats, auto-width, and embedded charts.
+    Production-Grade Operational Mission Excel Detection Data Report Generator.
+    Produces a single, clean, comprehensively styled master data sheet containing
+    every acoustic detection record for the selected mission.
     """
 
-    # Brand Colors
-    HEADER_FILL = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
-    SUBHEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    ZEBRA_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-    ACCENT_FILL = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
-    
-    HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    TITLE_FONT = Font(name="Calibri", size=14, bold=True, color="0F172A")
-    BOLD_FONT = Font(name="Calibri", size=10, bold=True, color="1E293B")
-    REGULAR_FONT = Font(name="Calibri", size=10, color="1E293B")
-    MUTED_FONT = Font(name="Calibri", size=9, color="64748B", italic=True)
+    # Maritime / Defense Color Palette
+    HEADER_FILL = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")       # Dark Navy Slate
+    ZEBRA_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")        # Subtle Slate Gray
+    CONFIRMED_FILL = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")    # Soft Green
+    PENDING_FILL = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")      # Soft Amber
+    REJECTED_FILL = PatternFill(start_color="FEF2F2", end_color="FEF2F2", fill_type="solid")     # Soft Red
 
+    # Fonts
+    HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    BOLD_FONT = Font(name="Calibri", size=10, bold=True, color="0F172A")
+    REGULAR_FONT = Font(name="Calibri", size=10, color="1E293B")
+    MONO_FONT = Font(name="Consolas", size=9, color="334155")
+    STATUS_CONFIRMED_FONT = Font(name="Calibri", size=10, bold=True, color="065F46")
+    STATUS_PENDING_FONT = Font(name="Calibri", size=10, bold=True, color="92400E")
+    STATUS_REJECTED_FONT = Font(name="Calibri", size=10, bold=True, color="991B1B")
+
+    # Borders
     THIN_BORDER = Border(
         left=Side(style='thin', color='E2E8F0'),
         right=Side(style='thin', color='E2E8F0'),
         top=Side(style='thin', color='E2E8F0'),
         bottom=Side(style='thin', color='E2E8F0')
     )
+    HEADER_BORDER = Border(
+        left=Side(style='thin', color='1E293B'),
+        right=Side(style='thin', color='1E293B'),
+        top=Side(style='medium', color='0F172A'),
+        bottom=Side(style='medium', color='0B132B')
+    )
+
+    LABEL_MAP = {
+        "debris_net": "Derelict Ghost Net",
+        "pipe_cylinder": "Pipeline / Cylinder",
+        "wreck_structure": "Shipwreck Structure",
+        "cargo_container": "Cargo Container",
+        "naval_mine": "Acoustic Mine Anomaly",
+        "pipe_joint": "Pipeline Joint / Free-Span",
+        "metal_debris": "Metallic Debris",
+        "tire_debris": "Submerged Tire / Rubber",
+        "tire": "Submerged Tire / Rubber"
+    }
 
     @classmethod
-    def _apply_table_styling(cls, ws, min_row: int, max_row: int, min_col: int, max_col: int, is_zebra: bool = True):
-        for col_idx in range(min_col, max_col + 1):
-            cell = ws.cell(row=min_row, column=col_idx)
-            cell.fill = cls.HEADER_FILL
-            cell.font = cls.HEADER_FONT
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        for row_idx in range(min_row + 1, max_row + 1):
-            fill = cls.ZEBRA_FILL if (is_zebra and row_idx % 2 == 0) else PatternFill(fill_type=None)
-            for col_idx in range(min_col, max_col + 1):
-                c = ws.cell(row=row_idx, column=col_idx)
-                if fill.fill_type:
-                    c.fill = fill
-                c.border = cls.THIN_BORDER
-                if not c.font or c.font.name != "Calibri":
-                    c.font = cls.REGULAR_FONT
+    def get_display_label(cls, class_name: Optional[str]) -> str:
+        if not class_name:
+            return "Unclassified Anomaly"
+        key = str(class_name).lower().strip()
+        return cls.LABEL_MAP.get(key, key.replace("_", " ").title())
 
     @classmethod
-    def _auto_column_widths(cls, ws):
-        for col in ws.columns:
-            max_len = 0
-            col_letter = get_column_letter(col[0].column)
-            for cell in col:
-                val = str(cell.value or '')
-                if cell.number_format and '%' in cell.number_format:
-                    val += '%'
-                max_len = max(max_len, len(val))
-            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+    def _format_timestamp(cls, ts_raw: Any) -> str:
+        if not ts_raw:
+            return "N/A"
+        if isinstance(ts_raw, datetime):
+            return ts_raw.strftime("%Y-%m-%d %H:%M:%S UTC")
+        ts_str = str(ts_raw).replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            return str(ts_raw)
 
     @classmethod
-    def generate_excel(cls, analysis: Dict[str, Any]) -> bytes:
+    def generate_excel(
+        cls,
+        analysis: Dict[str, Any],
+        detections: Optional[List[Dict[str, Any]]] = None
+    ) -> bytes:
+        """
+        Generates a clean, detailed, single-sheet Excel data report containing ALL
+        detection records for the selected survey mission.
+        """
         wb = openpyxl.Workbook()
         # Remove default sheet
-        wb.remove(wb.active)
+        if wb.active:
+            wb.remove(wb.active)
 
-        mission = analysis["mission"]
-        kpis = analysis["kpis"]
+        mission = analysis.get("mission", {})
         m_id = mission.get("mission_id", "MISSION-001")
 
-        # =====================================================================
-        # SHEET 1: EXECUTIVE SUMMARY
-        # =====================================================================
-        ws1 = wb.create_sheet(title="Executive Summary")
-        ws1.views.sheetView[0].showGridLines = True
-        
-        ws1.cell(row=1, column=1, value="HYDROGRAPHIC SURVEY MISSION — OPERATIONAL SUMMARY").font = cls.TITLE_FONT
-        ws1.cell(row=2, column=1, value=f"Mission ID: {m_id} | Survey: {mission.get('survey_name')} | Date: {mission.get('survey_date')}").font = cls.MUTED_FONT
+        # -------------------------------------------------------------------------
+        # 1. Resolve Detection Records
+        # -------------------------------------------------------------------------
+        det_list: List[Dict[str, Any]] = []
 
-        # Operational Assessment Box
-        ws1.cell(row=4, column=1, value="Operational Assessment:").font = cls.BOLD_FONT
-        ws1.merge_cells("A5:F6")
-        assess_cell = ws1.cell(row=5, column=1, value=analysis["operational_assessment"])
-        assess_cell.font = cls.REGULAR_FONT
-        assess_cell.fill = cls.ACCENT_FILL
-        assess_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        # Priority A: explicitly passed detections or detections attached to analysis
+        candidate_dets = detections if detections is not None else analysis.get("detections")
+        if candidate_dets:
+            det_list = list(candidate_dets)
 
-        # KPI Matrix
-        kpi_rows = [
-            ("Total Physical Targets", kpis["total_targets"]),
-            ("Multi-Pass Acoustic Detections", kpis["total_detections"]),
-            ("Mean Classification Confidence", f"{kpis['avg_confidence']}%"),
-            ("High Confidence Targets (>= 80%)", kpis["high_confidence_count"]),
-            ("Low Confidence Targets (< 70%)", kpis["low_confidence_count"]),
-            ("Acoustic Shadow Verified", f"{kpis['shadow_verified_count']} ({kpis['shadow_verified_pct']}%)"),
-            ("Shadow Unverified", kpis["shadow_unverified_count"]),
-            ("Pending Human Review", kpis["pending_count"]),
-            ("Confirmed Ground-Truth Targets", kpis["confirmed_count"]),
-            ("Rejected / False Alarms", kpis["rejected_count"]),
-            ("Analyst Review Completion", f"{kpis['review_completion_pct']}%"),
-            ("Highest Density Spatial Sector", kpis["highest_density_sector"]),
-            ("Acoustic Frequency", mission.get("acoustic_freq", "410 kHz")),
-            ("Survey Swath Width", f"{mission.get('swath_width_m')} m"),
-            ("Operating Depth", f"{mission.get('depth_m')} m")
+        # Priority B: If empty, query database directly for this mission
+        if not det_list and m_id:
+            try:
+                from app.db.repository import repo
+                db_dets = repo.get_all_detections(mission_id=m_id)
+                if db_dets:
+                    det_list = db_dets
+            except Exception:
+                pass
+
+        # Priority C: Extract observations from targets
+        if not det_list:
+            targets = analysis.get("targets") or analysis.get("priority_targets") or []
+            extracted = []
+            for t in targets:
+                obs_list = t.get("observations") or []
+                if obs_list:
+                    extracted.extend(obs_list)
+                else:
+                    extracted.append(t)
+            det_list = extracted
+
+        # Sort detections by pass number, then target_id, then timestamp if available
+        def sort_key(d: Dict[str, Any]):
+            return (
+                d.get("pass_number") or 1,
+                str(d.get("target_id") or ""),
+                str(d.get("timestamp") or "")
+            )
+        try:
+            det_list.sort(key=sort_key)
+        except Exception:
+            pass
+
+        # -------------------------------------------------------------------------
+        # 2. Setup Single Main Worksheet: "Mission Detections"
+        # -------------------------------------------------------------------------
+        ws = wb.create_sheet(title="Mission Detections")
+        ws.sheet_properties.tabColor = "0F172A"
+        ws.views.sheetView[0].showGridLines = True
+        ws.freeze_panes = "A2"
+
+        # Define 21 comprehensive column headers
+        headers = [
+            ("#", 6),
+            ("Mission ID", 16),
+            ("Target ID", 16),
+            ("Detection ID", 16),
+            ("Class", 16),
+            ("Classification Label", 24),
+            ("Confidence (%)", 16),
+            ("Latitude (WGS84)", 18),
+            ("Longitude (WGS84)", 18),
+            ("Estimated Size (m)", 18),
+            ("Shadow Verified", 16),
+            ("Review Status", 16),
+            ("Timestamp (UTC)", 22),
+            ("Pass Number", 14),
+            ("Survey Leg", 22),
+            ("Sonar Image Reference", 36),
+            ("Image ID", 24),
+            ("Bounding Box", 34),
+            ("Segmentation Data", 38),
+            ("Mask Reference", 18),
+            ("User ID", 16),
         ]
 
-        ws1.cell(row=8, column=1, value="Mission Metric").font = cls.HEADER_FONT
-        ws1.cell(row=8, column=1).fill = cls.HEADER_FILL
-        ws1.cell(row=8, column=2, value="Recorded Value").font = cls.HEADER_FONT
-        ws1.cell(row=8, column=2).fill = cls.HEADER_FILL
+        header_titles = [h[0] for h in headers]
+        default_widths = {idx + 1: h[1] for idx, h in enumerate(headers)}
 
-        for i, (metric, val) in enumerate(kpi_rows, start=9):
-            ws1.cell(row=i, column=1, value=metric).font = cls.BOLD_FONT
-            c2 = ws1.cell(row=i, column=2, value=val)
-            c2.font = cls.REGULAR_FONT
-            c2.alignment = Alignment(horizontal="right")
-            ws1.cell(row=i, column=1).border = cls.THIN_BORDER
-            c2.border = cls.THIN_BORDER
+        ws.append(header_titles)
+        ws.row_dimensions[1].height = 28
 
-        cls._auto_column_widths(ws1)
+        # Style Header Row
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.fill = cls.HEADER_FILL
+            cell.font = cls.HEADER_FONT
+            cell.border = cls.HEADER_BORDER
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        # =====================================================================
-        # SHEET 2: TARGET DETECTIONS (Detailed Master Register)
-        # =====================================================================
-        ws2 = wb.create_sheet(title="Target Detections")
-        ws2.views.sheetView[0].showGridLines = True
-        ws2.freeze_panes = "A2"
+        # -------------------------------------------------------------------------
+        # 3. Populate Detection Data Rows
+        # -------------------------------------------------------------------------
+        row_idx = 2
+        for idx, det in enumerate(det_list, start=1):
+            # Resolve fields
+            mission_val = det.get("mission_id") or m_id or "N/A"
+            target_val = det.get("target_id") or "N/A"
+            det_id_val = det.get("id") or det.get("observation_id") or f"det_{idx}"
+            cls_name = det.get("class") or det.get("category") or det.get("target_class") or "unclassified"
+            label_val = det.get("label") or cls.get_display_label(cls_name)
 
-        headers_s2 = [
-            "Target ID", "Classification Label", "Class Code", "Confidence (%)",
-            "Latitude (WGS84)", "Longitude (WGS84)", "Estimated Size (m)",
-            "Shadow Verified", "Review Status", "Priority Score",
-            "Observation Count", "Sonar Image Reference"
-        ]
-        ws2.append(headers_s2)
+            # Confidence as numeric float (0.0 to 1.0)
+            raw_conf = det.get("confidence") if det.get("confidence") is not None else det.get("fused_confidence")
+            conf_val: Optional[float] = None
+            if raw_conf is not None:
+                try:
+                    c_float = float(raw_conf)
+                    conf_val = c_float / 100.0 if c_float > 1.0 else c_float
+                except (ValueError, TypeError):
+                    conf_val = None
 
-        for t in analysis.get("priority_targets", []):
-            ws2.append([
-                t["target_id"],
-                t["label"],
-                t["class"],
-                t["confidence"] / 100.0,
-                t["latitude"],
-                t["longitude"],
-                t["estimated_size_m"],
-                t["shadow_verified"],
-                t["status"],
-                t["priority_score"],
-                t.get("observation_count", 1),
-                t.get("sonar_image_ref") or "None"
-            ])
+            # Coordinates
+            lat_val: Optional[float] = None
+            if det.get("latitude") is not None:
+                try:
+                    lat_val = float(det["latitude"])
+                except (ValueError, TypeError):
+                    pass
 
-        cls._apply_table_styling(ws2, 1, max(2, len(analysis.get("priority_targets", [])) + 1), 1, len(headers_s2))
-        
-        # Percentage formatting on confidence
-        for row in range(2, len(analysis.get("priority_targets", [])) + 2):
-            ws2.cell(row=row, column=4).number_format = "0.0%"
-            if ws2.cell(row=row, column=5).value is not None:
-                ws2.cell(row=row, column=5).number_format = "0.000000"
-                ws2.cell(row=row, column=6).number_format = "0.000000"
+            lon_val: Optional[float] = None
+            if det.get("longitude") is not None:
+                try:
+                    lon_val = float(det["longitude"])
+                except (ValueError, TypeError):
+                    pass
 
-        ws2.auto_filter.ref = f"A1:{get_column_letter(len(headers_s2))}{max(2, len(analysis.get('priority_targets', [])) + 1)}"
-        cls._auto_column_widths(ws2)
+            # Estimated size
+            size_val: Optional[float] = None
+            if det.get("estimated_size_m") is not None:
+                try:
+                    size_val = float(det["estimated_size_m"])
+                except (ValueError, TypeError):
+                    pass
 
-        # =====================================================================
-        # SHEET 3: CLASSIFICATION ANALYSIS
-        # =====================================================================
-        ws3 = wb.create_sheet(title="Classification Analysis")
-        ws3.views.sheetView[0].showGridLines = True
-        ws3.freeze_panes = "A2"
+            # Shadow verification
+            sv = det.get("shadow_verified")
+            if sv is True or sv == 1 or str(sv).lower() == "true":
+                shadow_str = "VERIFIED"
+            elif sv is False or sv == 0 or str(sv).lower() == "false":
+                shadow_str = "UNVERIFIED"
+            else:
+                shadow_str = "UNKNOWN"
 
-        headers_s3 = ["Classification Label", "Category Code", "Target Count", "% of Total", "Average Confidence", "Min Confidence", "Max Confidence"]
-        ws3.append(headers_s3)
+            # Status
+            raw_stat = det.get("status") or det.get("human_review_status") or "pending_review"
+            norm_stat = str(raw_stat).lower().strip()
+            if norm_stat in ["confirmed", "verified"]:
+                status_display = "Confirmed"
+            elif norm_stat in ["rejected", "false_alarm"]:
+                status_display = "Rejected"
+            else:
+                status_display = "Pending Review"
 
-        classes_data = analysis.get("classification_analysis", [])
-        for c in classes_data:
-            ws3.append([
-                c["label"],
-                c["class"],
-                c["count"],
-                c["percentage"] / 100.0,
-                c["avg_confidence"] / 100.0,
-                c["min_confidence"] / 100.0,
-                c["max_confidence"] / 100.0
-            ])
+            # Timestamp
+            ts_display = cls._format_timestamp(det.get("timestamp") or det.get("created_at"))
 
-        cls._apply_table_styling(ws3, 1, max(2, len(classes_data) + 1), 1, len(headers_s3))
+            # Pass Number and Survey Leg
+            pass_num = det.get("pass_number", 1)
+            survey_leg = det.get("survey_leg") or f"Swath Pass {pass_num}"
 
-        for row in range(2, len(classes_data) + 2):
-            ws3.cell(row=row, column=4).number_format = "0.0%"
-            ws3.cell(row=row, column=5).number_format = "0.0%"
-            ws3.cell(row=row, column=6).number_format = "0.0%"
-            ws3.cell(row=row, column=7).number_format = "0.0%"
+            # Images
+            sonar_img = det.get("sonar_image_ref") or "None"
+            image_id = det.get("image_id") or "None"
 
-        # Native OpenPyXL BarChart
-        if classes_data:
-            chart1 = BarChart()
-            chart1.type = "col"
-            chart1.style = 10
-            chart1.title = "Target Count by Classification"
-            chart1.y_axis.title = "Candidate Count"
-            chart1.x_axis.title = "Class"
-            data_ref = Reference(ws3, min_col=3, min_row=1, max_row=len(classes_data) + 1)
-            cats_ref = Reference(ws3, min_col=1, min_row=2, max_row=len(classes_data) + 1)
-            chart1.add_data(data_ref, titles_from_data=True)
-            chart1.set_categories(cats_ref)
-            chart1.legend = None
-            chart1.width = 16
-            chart1.height = 10
-            ws3.add_chart(chart1, "I2")
+            # Bounding Box JSON
+            bbox_raw = det.get("bounding_box")
+            if bbox_raw is not None:
+                bbox_str = json.dumps(bbox_raw) if not isinstance(bbox_raw, str) else bbox_raw
+            else:
+                bbox_str = "N/A"
 
-        cls._auto_column_widths(ws3)
+            # Segmentation Data JSON
+            seg_raw = det.get("segmentation")
+            if seg_raw is not None:
+                seg_str = json.dumps(seg_raw) if not isinstance(seg_raw, str) else seg_raw
+            else:
+                seg_str = "N/A"
 
-        # =====================================================================
-        # SHEET 4: SURVEY AREA RANKING
-        # =====================================================================
-        ws4 = wb.create_sheet(title="Survey Area Ranking")
-        ws4.views.sheetView[0].showGridLines = True
-        ws4.freeze_panes = "A2"
+            # Mask Reference
+            mask_ref = det.get("mask_ref") or "None"
 
-        headers_s4 = ["Rank", "Survey Sector", "Target Count", "% of Total", "Dominant Class", "Average Confidence"]
-        ws4.append(headers_s4)
+            # User ID
+            user_id = det.get("user_id") or "N/A"
 
-        sec_data = analysis.get("sector_analysis", [])
-        for idx, s in enumerate(sec_data, start=1):
-            ws4.append([
+            row_data = [
                 idx,
-                s["sector_id"],
-                s["target_count"],
-                s["percentage"] / 100.0,
-                s["dominant_class"],
-                s["avg_confidence"] / 100.0
-            ])
+                mission_val,
+                target_val,
+                det_id_val,
+                cls_name,
+                label_val,
+                conf_val,
+                lat_val,
+                lon_val,
+                size_val,
+                shadow_str,
+                status_display,
+                ts_display,
+                pass_num,
+                survey_leg,
+                sonar_img,
+                image_id,
+                bbox_str,
+                seg_str,
+                mask_ref,
+                user_id
+            ]
 
-        cls._apply_table_styling(ws4, 1, max(2, len(sec_data) + 1), 1, len(headers_s4))
-        for row in range(2, len(sec_data) + 2):
-            ws4.cell(row=row, column=4).number_format = "0.0%"
-            ws4.cell(row=row, column=6).number_format = "0.0%"
+            ws.append(row_data)
+            ws.row_dimensions[row_idx].height = 20
 
-        cls._auto_column_widths(ws4)
+            # Apply row styling
+            is_even = (row_idx % 2 == 0)
+            row_fill = cls.ZEBRA_FILL if is_even else PatternFill(fill_type=None)
 
-        # =====================================================================
-        # SHEET 5: REVIEW ANALYSIS
-        # =====================================================================
-        ws5 = wb.create_sheet(title="Review Analysis")
-        ws5.views.sheetView[0].showGridLines = True
-        ws5.freeze_panes = "A2"
+            for col_idx in range(1, len(headers) + 1):
+                c = ws.cell(row=row_idx, column=col_idx)
+                c.border = cls.THIN_BORDER
+                c.font = cls.REGULAR_FONT
 
-        headers_s5 = ["Review Category", "Target Count", "% of Total", "Analyst Action Requirement"]
-        ws5.append(headers_s5)
+                if row_fill.fill_type:
+                    c.fill = row_fill
 
-        rev = analysis["review_status"]
-        ws5.append(["Confirmed / Ground-Truthed", rev["confirmed_count"], rev["confirmed_pct"] / 100.0, "Verified physical target"])
-        ws5.append(["Pending Review", rev["pending_count"], rev["pending_pct"] / 100.0, "Requires operator inspection"])
-        ws5.append(["Rejected / False Alarms", rev["rejected_count"], rev["rejected_pct"] / 100.0, "Filtered non-target anomaly"])
+                # Specific Column Alignments and Formats
+                if col_idx == 1:  # #
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif col_idx in [2, 3, 4, 14, 17, 20, 21]:  # IDs, Pass Number
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif col_idx == 7:  # Confidence (%)
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    if conf_val is not None:
+                        c.number_format = "0.0%"
+                elif col_idx in [8, 9]:  # Coordinates
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    if c.value is not None and isinstance(c.value, (int, float)):
+                        c.number_format = "0.000000"
+                elif col_idx == 10:  # Estimated Size
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    if size_val is not None:
+                        c.number_format = "0.00"
+                elif col_idx == 11:  # Shadow Verified
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                    if shadow_str == "VERIFIED":
+                        c.font = cls.STATUS_CONFIRMED_FONT
+                    elif shadow_str == "UNVERIFIED":
+                        c.font = cls.STATUS_REJECTED_FONT
+                elif col_idx == 12:  # Review Status
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                    if status_display == "Confirmed":
+                        c.font = cls.STATUS_CONFIRMED_FONT
+                        c.fill = cls.CONFIRMED_FILL
+                    elif status_display == "Rejected":
+                        c.font = cls.STATUS_REJECTED_FONT
+                        c.fill = cls.REJECTED_FILL
+                    else:
+                        c.font = cls.STATUS_PENDING_FONT
+                        c.fill = cls.PENDING_FILL
+                elif col_idx == 13:  # Timestamp
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif col_idx == 16:  # Sonar Image Ref
+                    c.alignment = Alignment(horizontal="left", vertical="center")
+                elif col_idx in [18, 19]:  # Bounding Box & Segmentation JSON
+                    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                    c.font = cls.MONO_FONT
+                else:
+                    c.alignment = Alignment(horizontal="left", vertical="center")
 
-        cls._apply_table_styling(ws5, 1, 4, 1, len(headers_s5))
-        for row in range(2, 5):
-            ws5.cell(row=row, column=3).number_format = "0.0%"
+            row_idx += 1
 
-        # Pie Chart for Review Status
-        pie = PieChart()
-        pie.title = "Human Review Status Distribution"
-        data_ref = Reference(ws5, min_col=2, min_row=1, max_row=4)
-        labels_ref = Reference(ws5, min_col=1, min_row=2, max_row=4)
-        pie.add_data(data_ref, titles_from_data=True)
-        pie.set_categories(labels_ref)
-        pie.width = 14
-        pie.height = 9
-        ws5.add_chart(pie, "F2")
+        # -------------------------------------------------------------------------
+        # 4. Handle Empty Detection Fallback
+        # -------------------------------------------------------------------------
+        if len(det_list) == 0:
+            ws.append([1, m_id, "NO_RECORDS", "N/A", "N/A", "No Detections Found", None, None, None, None, "UNKNOWN", "N/A", "N/A", 1, "N/A", "None", "None", "N/A", "N/A", "None", "N/A"])
+            ws.row_dimensions[2].height = 22
+            for col_idx in range(1, len(headers) + 1):
+                c = ws.cell(row=2, column=col_idx)
+                c.border = cls.THIN_BORDER
+                c.font = cls.REGULAR_FONT
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            row_idx = 3
 
-        cls._auto_column_widths(ws5)
+        # -------------------------------------------------------------------------
+        # 5. Column Widths & AutoFilter
+        # -------------------------------------------------------------------------
+        max_row = max(2, row_idx - 1)
+        max_col_letter = get_column_letter(len(headers))
 
-        # =====================================================================
-        # SHEET 6: CONFIDENCE ANALYSIS
-        # =====================================================================
-        ws6 = wb.create_sheet(title="Confidence Analysis")
-        ws6.views.sheetView[0].showGridLines = True
-        ws6.freeze_panes = "A2"
+        # Enable AutoFilter on the table
+        ws.auto_filter.ref = f"A1:{max_col_letter}{max_row}"
 
-        headers_s6 = ["Confidence Range", "Target Count", "% of Total", "Risk Interpretation"]
-        ws6.append(headers_s6)
+        # Set column widths with smart clamping
+        for col_idx, (hdr_name, def_w) in enumerate(headers, start=1):
+            col_letter = get_column_letter(col_idx)
+            max_len = len(hdr_name)
 
-        c_dist = analysis["confidence_analysis"]["distribution"]
-        risk_labels = {
-            "90%–100% (Very High)": "High certainty acoustic signature",
-            "80%–89% (High)": "Strong acoustic signature",
-            "70%–79% (Moderate)": "Candidate return requiring cross-pass check",
-            "< 70% (Low)": "Low confidence return"
-        }
-        for d in c_dist:
-            ws6.append([
-                d["range"],
-                d["count"],
-                d["pct"] / 100.0,
-                risk_labels.get(d["range"], "Candidate return")
-            ])
+            # Sample first 50 rows to calculate auto width without freezing on huge segmentation polygons
+            for r in range(1, min(max_row + 1, 50)):
+                val_str = str(ws.cell(row=r, column=col_idx).value or "")
+                # Cap line length if contains newline or JSON
+                first_line = val_str.split("\n")[0]
+                max_len = max(max_len, min(len(first_line), 45))
 
-        cls._apply_table_styling(ws6, 1, len(c_dist) + 1, 1, len(headers_s6))
-        for row in range(2, len(c_dist) + 2):
-            ws6.cell(row=row, column=3).number_format = "0.0%"
+            # Constrain JSON & URL columns to designated width
+            if col_idx in [16, 18, 19]:
+                ws.column_dimensions[col_letter].width = def_w
+            else:
+                ws.column_dimensions[col_letter].width = max(def_w, max_len + 3)
 
-        # Summary Statistics Table
-        ws6.cell(row=len(c_dist) + 3, column=1, value="Metric").font = cls.HEADER_FONT
-        ws6.cell(row=len(c_dist) + 3, column=1).fill = cls.SUBHEADER_FILL
-        ws6.cell(row=len(c_dist) + 3, column=2, value="Value").font = cls.HEADER_FONT
-        ws6.cell(row=len(c_dist) + 3, column=2).fill = cls.SUBHEADER_FILL
-
-        c_metrics = [
-            ("Mean Confidence", f"{analysis['confidence_analysis']['average']}%"),
-            ("Median Confidence", f"{analysis['confidence_analysis']['median']}%"),
-            ("Minimum Confidence", f"{analysis['confidence_analysis']['min']}%"),
-            ("Maximum Confidence", f"{analysis['confidence_analysis']['max']}%"),
-        ]
-        for idx, (m, v) in enumerate(c_metrics, start=len(c_dist) + 4):
-            ws6.cell(row=idx, column=1, value=m).font = cls.BOLD_FONT
-            ws6.cell(row=idx, column=2, value=v).font = cls.REGULAR_FONT
-            ws6.cell(row=idx, column=1).border = cls.THIN_BORDER
-            ws6.cell(row=idx, column=2).border = cls.THIN_BORDER
-
-        cls._auto_column_widths(ws6)
-
-        # =====================================================================
-        # SHEET 7: DATA QUALITY
-        # =====================================================================
-        ws7 = wb.create_sheet(title="Data Quality")
-        ws7.views.sheetView[0].showGridLines = True
-        ws7.freeze_panes = "A2"
-
-        headers_s7 = ["Data Quality Metric", "Evaluated Count", "Compliance / Completeness Rate"]
-        ws7.append(headers_s7)
-
-        dq = analysis["data_quality"]
-        dq_rows = [
-            ("Total Physical Targets", dq["total_targets"], "100.0%"),
-            ("Multi-Pass Acoustic Observations", dq["total_detections"], "100.0%"),
-            ("Valid Coordinate Coverage", dq["valid_coordinates"], f"{dq['coordinate_completeness_pct']}%"),
-            ("Missing Coordinates", dq["missing_coordinates"], f"{round((dq['missing_coordinates'] / dq['total_targets'] * 100), 1) if dq['total_targets'] else 0.0}%"),
-            ("Confidence Values Recorded", dq["valid_confidence"], "100.0%"),
-            ("Acoustic Shadow Verification Rate", dq["shadow_verified"], f"{kpis['shadow_verified_pct']}%"),
-            ("Evidence Imagery Associated", dq["evidence_available"], f"{dq['evidence_completeness_pct']}%"),
-            ("Missing Evidence Imagery", dq["missing_evidence"], f"{round((dq['missing_evidence'] / dq['total_targets'] * 100), 1) if dq['total_targets'] else 0.0}%"),
-            ("Pending Ground-Truth Reviews", dq["pending_review"], f"{round((dq['pending_review'] / dq['total_targets'] * 100), 1) if dq['total_targets'] else 0.0}%"),
-        ]
-        for item in dq_rows:
-            ws7.append([item[0], item[1], item[2]])
-
-        cls._apply_table_styling(ws7, 1, len(dq_rows) + 1, 1, len(headers_s7))
-        cls._auto_column_widths(ws7)
-
-        # =====================================================================
-        # SHEET 8: MISSION TIMELINE
-        # =====================================================================
-        ws8 = wb.create_sheet(title="Mission Timeline")
-        ws8.views.sheetView[0].showGridLines = True
-        ws8.freeze_panes = "A2"
-
-        headers_s8 = ["Event Stage", "Timestamp (UTC)", "Operational Milestone Description"]
-        ws8.append(headers_s8)
-
-        t_items = analysis.get("timeline", [])
-        for ti in t_items:
-            ws8.append([ti["stage"], str(ti["timestamp"]), ti["description"]])
-
-        cls._apply_table_styling(ws8, 1, max(2, len(t_items) + 1), 1, len(headers_s8))
-        cls._auto_column_widths(ws8)
-
-        # =====================================================================
-        # SHEET 9: PRIORITY TARGETS
-        # =====================================================================
-        ws9 = wb.create_sheet(title="Priority Targets")
-        ws9.views.sheetView[0].showGridLines = True
-        ws9.freeze_panes = "A2"
-
-        headers_s9 = [
-            "Rank", "Target ID", "Classification", "Confidence",
-            "Acoustic Shadow", "Estimated Size (m)", "Status",
-            "Priority Score", "Latitude", "Longitude"
-        ]
-        ws9.append(headers_s9)
-
-        for t in analysis.get("priority_targets", []):
-            ws9.append([
-                t["rank"],
-                t["target_id"],
-                t["label"],
-                t["confidence"] / 100.0,
-                t["shadow_verified"],
-                t["estimated_size_m"],
-                t["status"],
-                t["priority_score"],
-                t["latitude"],
-                t["longitude"]
-            ])
-
-        cls._apply_table_styling(ws9, 1, max(2, len(analysis.get("priority_targets", [])) + 1), 1, len(headers_s9))
-        for row in range(2, len(analysis.get("priority_targets", [])) + 2):
-            ws9.cell(row=row, column=4).number_format = "0.0%"
-            if ws9.cell(row=row, column=9).value is not None:
-                ws9.cell(row=row, column=9).number_format = "0.000000"
-                ws9.cell(row=row, column=10).number_format = "0.000000"
-
-        cls._auto_column_widths(ws9)
-
-        # =====================================================================
-        # SHEET 10: EVIDENCE INDEX
-        # =====================================================================
-        ws10 = wb.create_sheet(title="Evidence Index")
-        ws10.views.sheetView[0].showGridLines = True
-        ws10.freeze_panes = "A2"
-
-        headers_s10 = ["Target ID", "Classification", "Confidence", "Coordinates", "Evidence Reference / URL", "Shadow Verification"]
-        ws10.append(headers_s10)
-
-        for t in analysis.get("priority_targets", []):
-            coord_str = f"{t['latitude']}, {t['longitude']}" if t['latitude'] is not None else "N/A"
-            ws10.append([
-                t["target_id"],
-                t["label"],
-                t["confidence"] / 100.0,
-                coord_str,
-                t.get("sonar_image_ref") or "No Evidence Image",
-                t["shadow_verified"]
-            ])
-
-        cls._apply_table_styling(ws10, 1, max(2, len(analysis.get("priority_targets", [])) + 1), 1, len(headers_s10))
-        for row in range(2, len(analysis.get("priority_targets", [])) + 2):
-            ws10.cell(row=row, column=3).number_format = "0.0%"
-
-        cls._auto_column_widths(ws10)
-
-        # Save workbook to in-memory bytes
+        # -------------------------------------------------------------------------
+        # 6. Save and Return In-Memory Bytes
+        # -------------------------------------------------------------------------
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
         return buffer.getvalue()
+
 
 excel_report_generator = ExcelReportGenerator()

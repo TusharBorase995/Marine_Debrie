@@ -420,6 +420,8 @@ class ReportAnalysisService:
             "largest_targets": largest_targets,
             "data_quality": data_quality,
             "timeline": timeline,
+            "detections": detections or [],
+            "targets": targets or [],
             "generated_at": datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M:%S UTC")
         }
 
