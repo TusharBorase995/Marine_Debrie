@@ -5,6 +5,32 @@ from sqlalchemy.orm import relationship
 from app.db.database import Base
 
 
+class UserModel(Base):
+    """
+    SQLAlchemy model for Authenticated Platform Operators & Specialists.
+    Enforces user-scoped data workspaces and access control.
+    """
+    __tablename__ = "users"
+
+    user_id = Column(String(64), primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=False)
+    role = Column(String(128), default="Lead Marine Analyst", nullable=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "email": self.email,
+            "full_name": self.full_name,
+            "role": self.role,
+            "is_demo": bool(self.is_demo),
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
 class SonarImageModel(Base):
     """
     SQLAlchemy model for Sonar Evidence Images.
@@ -13,6 +39,7 @@ class SonarImageModel(Base):
     __tablename__ = "sonar_images"
 
     image_id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     mime_type = Column(String(64), default="image/png", nullable=False)
     storage_key = Column(String(512), nullable=True)  # S3 Key in Neon Object Storage (sagar-images)
@@ -22,6 +49,7 @@ class SonarImageModel(Base):
     def to_dict(self):
         return {
             "image_id": self.image_id,
+            "user_id": self.user_id,
             "filename": self.filename,
             "mime_type": self.mime_type,
             "storage_key": self.storage_key,
@@ -39,6 +67,7 @@ class MissionModel(Base):
     __tablename__ = "missions"
 
     mission_id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
     survey_name = Column(String(255), nullable=False)
     ingestion_mode = Column(String(32), default="batch", nullable=False)  # 'live' or 'batch'
     status = Column(String(32), default="completed", nullable=False)      # 'active', 'completed', 'archived'
@@ -61,6 +90,7 @@ class MissionModel(Base):
 
         return {
             "mission_id": self.mission_id,
+            "user_id": self.user_id,
             "survey_name": self.survey_name,
             "ingestion_mode": self.ingestion_mode,
             "status": self.status,
@@ -87,6 +117,7 @@ class TargetModel(Base):
     __tablename__ = "targets"
 
     target_id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
     mission_id = Column(String(64), ForeignKey("missions.mission_id", ondelete="CASCADE"), nullable=True, index=True)
     image_id = Column(String(64), ForeignKey("sonar_images.image_id", ondelete="SET NULL"), nullable=True)
     target_class = Column(String(64), nullable=False, index=True)  # e.g. 'debris_net', 'pipe_cylinder'
@@ -115,6 +146,7 @@ class TargetModel(Base):
         return {
             "target_id": self.target_id,
             "id": self.target_id,  # Compatibility alias
+            "user_id": self.user_id,
             "mission_id": self.mission_id or "MISSION-001",
             "image_id": self.image_id,
             "class": self.target_class,
@@ -146,6 +178,7 @@ class ObservationModel(Base):
     __tablename__ = "observations"
 
     id = Column(String(64), primary_key=True, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
     target_id = Column(String(64), ForeignKey("targets.target_id", ondelete="CASCADE"), nullable=False, index=True)
     mission_id = Column(String(64), nullable=True, index=True)
     image_id = Column(String(64), ForeignKey("sonar_images.image_id", ondelete="SET NULL"), nullable=True)
@@ -172,6 +205,7 @@ class ObservationModel(Base):
         image_url = f"/api/images/{self.image_id}" if self.image_id else self.sonar_image_ref
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "target_id": self.target_id,
             "mission_id": self.mission_id or "MISSION-001",
             "image_id": self.image_id,
@@ -192,4 +226,3 @@ class ObservationModel(Base):
             "sonar_image_ref": image_url,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None
         }
-

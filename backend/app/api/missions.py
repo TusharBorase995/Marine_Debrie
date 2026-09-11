@@ -6,7 +6,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Request, Query, Response, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request, Query, Response, Header, status
 from pydantic import BaseModel, Field
 
 from mock_data import db_mock
@@ -149,11 +149,11 @@ def consolidate_target_record(canonical: dict):
         db_mock.targets.append(new_tgt)
 
 @router.get("", response_model=List[dict])
-def get_missions():
+def get_missions(x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """GET /api/missions — List all missions with live computed summary metrics directly from PostgreSQL."""
     try:
         from app.db.repository import repo
-        return repo.get_all_missions()
+        return repo.get_all_missions(user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -161,11 +161,11 @@ def get_missions():
         )
 
 @router.get("/active")
-def get_active_mission():
+def get_active_mission(x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """GET /api/missions/active — Returns the currently active survey mission from PostgreSQL."""
     from app.db.repository import repo
     try:
-        active = repo.get_active_mission()
+        active = repo.get_active_mission(user_id=x_user_id)
         return {"active_mission": active}
     except Exception as e:
         raise HTTPException(
@@ -174,11 +174,11 @@ def get_active_mission():
         )
 
 @router.post("/deactivate")
-async def deactivate_missions():
+async def deactivate_missions(x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """POST /api/missions/deactivate — Clears active mission selection."""
     from app.db.repository import repo
     try:
-        repo.deactivate_all_missions()
+        repo.deactivate_all_missions(user_id=x_user_id)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database error: {e}")
     await ws_manager.broadcast({
@@ -188,11 +188,11 @@ async def deactivate_missions():
     return {"success": True, "message": "All missions deactivated"}
 
 @router.post("/{mission_id}/active")
-async def set_active_mission(mission_id: str):
+async def set_active_mission(mission_id: str, x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """POST /api/missions/{mission_id}/active — Sets the specified mission as active in PostgreSQL."""
     from app.db.repository import repo
     try:
-        updated = repo.set_active_mission(mission_id)
+        updated = repo.set_active_mission(mission_id, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database error: {e}")
     if not updated:
@@ -204,12 +204,13 @@ async def set_active_mission(mission_id: str):
     return {"success": True, "active_mission": updated}
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_mission(payload: MissionCreatePayload):
+def create_mission(payload: MissionCreatePayload, x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """POST /api/missions — Register a new mission record directly in PostgreSQL."""
     from app.db.repository import repo
     m_id = payload.mission_id or repo.generate_next_mission_id()
     mission_record = {
         "mission_id": m_id,
+        "user_id": x_user_id,
         "survey_name": payload.survey_name or f"Survey Mission {m_id.split('-')[-1]}",
         "description": payload.description or "Acoustic side-scan sonar hydrographic survey",
         "ingestion_mode": payload.ingestion_mode,
@@ -219,7 +220,7 @@ def create_mission(payload: MissionCreatePayload):
         "is_active": True
     }
     try:
-        created = repo.create_or_update_mission(mission_record)
+        created = repo.create_or_update_mission(mission_record, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -228,11 +229,11 @@ def create_mission(payload: MissionCreatePayload):
     return created
 
 @router.delete("/{mission_id}", status_code=status.HTTP_200_OK)
-async def delete_mission(mission_id: str):
+async def delete_mission(mission_id: str, x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """DELETE /api/missions/{mission_id} — Delete mission and its cascaded targets from PostgreSQL permanently."""
     from app.db.repository import repo
     try:
-        m = repo.get_mission(mission_id)
+        m = repo.get_mission(mission_id, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -254,11 +255,11 @@ async def delete_mission(mission_id: str):
     return {"message": f"Mission '{mission_id}' deleted successfully", "mission_id": mission_id}
 
 @router.get("/{mission_id}")
-def get_mission_detail(mission_id: str):
+def get_mission_detail(mission_id: str, x_user_id: Optional[str] = Header(None, alias="x-user-id")):
     """GET /api/missions/{mission_id} — Single mission metadata directly from PostgreSQL."""
     from app.db.repository import repo
     try:
-        m = repo.get_mission(mission_id)
+        m = repo.get_mission(mission_id, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

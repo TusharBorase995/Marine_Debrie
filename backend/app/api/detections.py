@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Header, status
 from pydantic import BaseModel, Field
 
 from mock_data import db_mock
@@ -35,18 +35,20 @@ def get_detections(
     cls: Optional[str] = Query(None, alias="class"),
     status_filter: Optional[str] = Query(None, alias="status"),
     target_id: Optional[str] = Query(None),
-    mission_id: Optional[str] = Query(None)
+    mission_id: Optional[str] = Query(None),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
     """
     GET /api/detections — returns list of individual sonar detections/observations directly from PostgreSQL.
-    Supports class, status, target_id, and mission_id filtering.
+    Supports class, status, target_id, mission_id, and user workspace filtering.
     """
     try:
         return repo.get_all_detections(
             cls_name=cls,
             status=status_filter,
             target_id=target_id,
-            mission_id=mission_id
+            mission_id=mission_id,
+            user_id=x_user_id
         )
     except Exception as e:
         raise HTTPException(
@@ -58,14 +60,15 @@ def get_detections(
 def get_consolidated_targets(
     cls: Optional[str] = Query(None, alias="class"),
     status_filter: Optional[str] = Query(None, alias="status"),
-    mission_id: Optional[str] = Query(None)
+    mission_id: Optional[str] = Query(None),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
     """
     GET /api/detections/targets — convenience alias returning consolidated physical targets directly from PostgreSQL.
     Enforces strictly ONE target record per physical seafloor object.
     """
     try:
-        return repo.get_consolidated_targets(cls_name=cls, status=status_filter, mission_id=mission_id)
+        return repo.get_consolidated_targets(cls_name=cls, status=status_filter, mission_id=mission_id, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -99,6 +102,7 @@ async def create_detection(request: Request):
     from app.api.missions import normalize_detection_item, consolidate_target_record
     from app.db.repository import repo, SonarRepository
 
+    req_user_id = request.headers.get("x-user-id")
     content_type = request.headers.get("content-type", "").lower()
     body = {}
     uploaded_image_file = None
@@ -160,7 +164,7 @@ async def create_detection(request: Request):
             mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
 
             try:
-                SonarRepository.save_sonar_image(image_id, saved_filename, mime_type, img_bytes)
+                SonarRepository.save_sonar_image(image_id, saved_filename, mime_type, img_bytes, user_id=req_user_id)
             except Exception as e:
                 print(f"[Neon Storage] Image save error: {e}")
 
@@ -177,7 +181,7 @@ async def create_detection(request: Request):
         raise HTTPException(status_code=400, detail="Missing detection payload. Send 'detection' JSON or form fields.")
 
     # Route detection to active mission or serial-wise created mission
-    mission_id = repo.resolve_target_mission(body.get("mission_id"), ingestion_mode="live")
+    mission_id = repo.resolve_target_mission(body.get("mission_id"), ingestion_mode="live", user_id=req_user_id)
     canonical = normalize_detection_item(body, mission_id=mission_id)
     if image_url:
         canonical["sonar_image_ref"] = image_url
@@ -186,7 +190,7 @@ async def create_detection(request: Request):
 
     # Persist in PostgreSQL database (mandatory)
     try:
-        repo.insert_detection(canonical)
+        repo.insert_detection(canonical, user_id=req_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

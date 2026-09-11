@@ -1,13 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BigSagarOceanVisual from '../components/sarvam/BigSagarOceanVisual';
+import authService from '../services/authService';
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
+  
+  // Auth Modal State
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [userRole, setUserRole] = useState('Lead Marine Analyst');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   // Track scroll position for navbar styling
   useEffect(() => {
@@ -18,16 +27,55 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const handleLaunchDashboard = () => {
-    localStorage.setItem('sonar_user_session', 'active');
-    localStorage.setItem('sonar_user_designation', userRole);
-    localStorage.setItem('sonar_user_station_id', 'IN-SAGAR-01');
-    navigate('/dashboard');
+  const fillTesterCredentials = () => {
+    setAuthMode('login');
+    setEmail('tester@sagar.gov.in');
+    setPassword('Tester@123');
+    setUserRole('Lead Marine Analyst');
+    setAuthError('');
   };
 
-  const handleModalSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    handleLaunchDashboard();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      let res;
+      if (authMode === 'login') {
+        res = await authService.login({
+          email: email.trim(),
+          password: password,
+          role: userRole
+        });
+      } else {
+        res = await authService.register({
+          email: email.trim(),
+          password: password,
+          fullName: fullName.trim() || 'Marine Specialist',
+          role: userRole
+        });
+      }
+
+      if (res && res.user) {
+        const u = res.user;
+        localStorage.setItem('sonar_user_session', 'active');
+        localStorage.setItem('sonar_user_id', u.user_id);
+        localStorage.setItem('sonar_user_email', u.email);
+        localStorage.setItem('sonar_user_name', u.full_name || 'Marine Specialist');
+        localStorage.setItem('sonar_user_designation', userRole || u.role || 'Lead Marine Analyst');
+        localStorage.setItem('sonar_user_station_id', u.is_demo ? 'IN-SAGAR-01' : `IN-${u.user_id.slice(-6)}`);
+        navigate('/dashboard');
+      } else {
+        throw new Error('Authentication response was empty.');
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      const msg = err.response?.data?.detail || err.message || 'Authentication failed. Please check credentials.';
+      setAuthError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   return (
@@ -456,57 +504,191 @@ export default function LandingPage() {
 
       {/* AUTHENTICATION / PLATFORM LAUNCH MODAL */}
       {showSignInModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl border border-st max-w-md w-full p-6 shadow-2xl animate-arrival">
-            <div className="flex items-center justify-between pb-4 border-b border-st/60 mb-4">
-              <div className="flex items-center gap-2">
-                <span className="font-season-mix font-bold text-lg text-[#0B192C]">SAGAR</span>
-                <span className="text-xs bg-cyan-50 text-cyan-800 px-2 py-0.5 rounded font-mono font-medium">Mission Console Access</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl border border-st max-w-lg w-full p-6 shadow-2xl animate-arrival relative my-8">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3.5 border-b border-st/80">
+              <div className="flex items-center gap-2.5">
+                <span className="font-matter font-bold text-xl tracking-tight text-[#1e2033] lowercase">
+                  sagar
+                </span>
+                <span className="text-[11px] bg-cyan-100/70 text-cyan-900 border border-cyan-300/60 px-2.5 py-0.5 rounded-full font-mono font-semibold">
+                  Sovereign Cloud Console
+                </span>
               </div>
               <button 
-                onClick={() => setShowSignInModal(false)}
-                className="text-tx-tertiary hover:text-tx text-lg cursor-pointer"
+                onClick={() => { setShowSignInModal(false); setAuthError(''); }}
+                className="text-tx-tertiary hover:text-tx text-lg w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center cursor-pointer transition"
+                aria-label="Close modal"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleModalSubmit} className="flex flex-col gap-4">
+            {/* Pre-Configured Tester Callout Box */}
+            <div className="mt-4 p-3.5 rounded-xl bg-gradient-to-br from-cyan-50/90 via-sky-50/60 to-blue-50/80 border border-cyan-200/80 shadow-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-950">
+                    <span className="w-2 h-2 rounded-full bg-cyan-600 animate-pulse" />
+                    <span>Tester & Evaluator Fast Access</span>
+                  </div>
+                  <div className="mt-1 font-mono text-[11px] text-cyan-900/90 space-y-0.5">
+                    <div><span className="text-cyan-700 font-semibold">Email:</span> tester@sagar.gov.in</div>
+                    <div><span className="text-cyan-700 font-semibold">Password:</span> Tester@123</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fillTesterCredentials}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-800 active:scale-95 text-white text-[11px] font-semibold tracking-wide transition shadow-xs cursor-pointer shrink-0"
+                >
+                  ⚡ Auto-Fill Tester
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-cyan-800/80 leading-relaxed">
+                Preloaded with live hydrographic survey data (<span className="font-mono font-semibold">MISSION-001</span>) stored in deployed Neon PostgreSQL.
+              </p>
+            </div>
+
+            {/* Auth Mode Toggle Tabs */}
+            <div className="flex mt-4 p-1 bg-slate-100 rounded-xl border border-slate-200/80 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                className={`flex-1 py-2 rounded-lg transition-all cursor-pointer text-center ${
+                  authMode === 'login'
+                    ? 'bg-white text-[#1e2033] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Log In (Existing Account)
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                className={`flex-1 py-2 rounded-lg transition-all cursor-pointer text-center ${
+                  authMode === 'register'
+                    ? 'bg-white text-[#1e2033] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Create New Account
+              </button>
+            </div>
+
+            {/* Error Banner */}
+            {authError && (
+              <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium leading-tight">
+                ⚠️ {authError}
+              </div>
+            )}
+
+            {/* Auth Form */}
+            <form onSubmit={handleAuthSubmit} className="mt-4 flex flex-col gap-3.5">
+              
+              {/* Position / Role Selector */}
               <div>
-                <label className="block text-xs font-medium text-tx mb-1">Select Operational Role</label>
+                <label className="block text-xs font-bold text-[#1e2033] mb-1">
+                  Operational Position / Designation
+                </label>
                 <select
                   value={userRole}
                   onChange={(e) => setUserRole(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-st text-xs font-matter text-tx bg-sf-secondary/40 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-medium text-[#1e2033] bg-white focus:outline-none focus:ring-2 focus:ring-cyan-600/30 focus:border-cyan-600 transition"
                 >
                   <option value="Lead Marine Analyst">Lead Marine Analyst (Acoustic Sonar Review)</option>
-                  <option value="Hydrographic Survey Specialist">Hydrographic Survey Specialist (Mission Planning)</option>
-                  <option value="Naval Operations Director">Naval Operations Director (Fleet Telemetry)</option>
+                  <option value="Autonomous Drone Operator">Autonomous Drone Operator (USV / UUV Fleet Control)</option>
+                  <option value="Hydrographic Survey Specialist">Hydrographic Survey Specialist (Mission Bathymetry)</option>
+                  <option value="Naval Operations Director">Naval Operations Director (Fleet Command & Strategy)</option>
                   <option value="ATR Deep Learning Specialist">ATR Deep Learning Specialist (Model Ground-Truthing)</option>
                 </select>
               </div>
 
+              {/* Full Name for Registration */}
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-xs font-bold text-[#1e2033] mb-1">
+                    Full Name / Title
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Commander Vikram Singh"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-medium text-[#1e2033] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-600/30 focus:border-cyan-600 transition"
+                  />
+                </div>
+              )}
+
+              {/* Email ID */}
               <div>
-                <label className="block text-xs font-medium text-tx mb-1">Sovereign Encryption Token</label>
+                <label className="block text-xs font-bold text-[#1e2033] mb-1">
+                  Email Address / Station ID
+                </label>
                 <input
-                  type="password"
-                  defaultValue="••••••••••••••••"
-                  className="w-full p-2.5 rounded-lg border border-st text-xs font-mono text-tx bg-sf-secondary/40 focus:outline-none"
-                  readOnly
+                  type="email"
+                  required
+                  placeholder="name@organization.gov.in"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-medium text-[#1e2033] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-600/30 focus:border-cyan-600 transition font-mono"
                 />
               </div>
 
+              {/* Password */}
+              <div>
+                <label className="block text-xs font-bold text-[#1e2033] mb-1">
+                  Access Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="At least 6 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-medium text-[#1e2033] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-600/30 focus:border-cyan-600 transition font-mono"
+                />
+              </div>
+
+              {/* Information Note */}
+              <div className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-200/70">
+                {authMode === 'login' ? (
+                  <span>
+                    Logging in connects your session directly to the sovereign deployed database and immediately opens your active dashboard.
+                  </span>
+                ) : (
+                  <span>
+                    New accounts receive an isolated, independent workspace in Neon PostgreSQL with private S3 image storage. You can delete your account and all its data anytime.
+                  </span>
+                )}
+              </div>
+
+              {/* Action Buttons */}
               <div className="pt-2 flex gap-3">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-matter font-medium transition-all cursor-pointer shadow-sm"
+                  disabled={authLoading}
+                  className="flex-1 py-3 rounded-full text-white text-xs font-bold tracking-wide transition-all cursor-pointer shadow-md disabled:opacity-60 flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(to bottom, #2b324b 0%, #151828 100%)' }}
                 >
-                  Enter Mission Platform
+                  {authLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Connecting Database...</span>
+                    </>
+                  ) : authMode === 'login' ? (
+                    <span>Log In & Enter Dashboard →</span>
+                  ) : (
+                    <span>Create Independent Account & Launch →</span>
+                  )}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowSignInModal(false)}
-                  className="px-4 py-2.5 rounded-full border border-st text-xs font-matter text-tx-secondary hover:bg-sf-secondary cursor-pointer"
+                  onClick={() => { setShowSignInModal(false); setAuthError(''); }}
+                  className="px-5 py-3 rounded-full border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer transition"
                 >
                   Cancel
                 </button>

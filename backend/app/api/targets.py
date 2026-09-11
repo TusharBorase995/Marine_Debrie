@@ -1,5 +1,5 @@
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Header, status
 from pydantic import BaseModel
 
 from app.db.repository import repo
@@ -14,15 +14,16 @@ class TargetReviewPayload(BaseModel):
 def get_targets(
     cls: Optional[str] = Query(None, alias="class"),
     status_filter: Optional[str] = Query(None, alias="status"),
-    mission_id: Optional[str] = Query(None)
+    mission_id: Optional[str] = Query(None),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
     """
     GET /api/targets — returns list of unique physical targets consolidated from multiple sonar observations.
     Guarantees exactly ONE target record per physical seafloor object directly from PostgreSQL.
-    Supports filtering by class, status, and mission_id.
+    Supports filtering by class, status, mission_id, and user workspace.
     """
     try:
-        return repo.get_consolidated_targets(cls_name=cls, status=status_filter, mission_id=mission_id)
+        return repo.get_consolidated_targets(cls_name=cls, status=status_filter, mission_id=mission_id, user_id=x_user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

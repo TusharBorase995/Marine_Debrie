@@ -10,6 +10,7 @@ import detectionService from '../services/detectionService';
 import targetService from '../services/targetService';
 import { useMission } from '../context/MissionContext';
 import { formatClassLabel } from '../utils/formatters';
+import authService from '../services/authService';
 
 export const HeaderConsole = ({ wsConnected = false }) => {
   const navigate = useNavigate();
@@ -372,7 +373,7 @@ export const Topbar = ({
   const [showDbModal, setShowDbModal] = useState(false);
   const [checkingDb, setCheckingDb] = useState(false);
 
-  // Operational Profile & Session State (Designation based)
+  // Operational Profile & Session State (Multi-tenant authentication)
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileContainerRef = useRef(null);
   const [userDesignation, setUserDesignation] = useState(() => {
@@ -381,15 +382,29 @@ export const Topbar = ({
   const [stationId, setStationId] = useState(() => {
     return localStorage.getItem('sonar_user_station_id') || 'HYDRO-01';
   });
+  const [userEmail, setUserEmail] = useState(() => {
+    return localStorage.getItem('sonar_user_email') || 'tester@sagar.gov.in';
+  });
+  const [userName, setUserName] = useState(() => {
+    return localStorage.getItem('sonar_user_name') || 'Marine Specialist';
+  });
+  const [userId, setUserId] = useState(() => {
+    return localStorage.getItem('sonar_user_id') || 'USR-TESTER-001';
+  });
+
+  // Account Deletion Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Calculate designation initials (e.g. "LM" for "Lead Marine Analyst")
   const designationInitials = useMemo(() => {
-    const parts = (userDesignation || 'Lead Marine Analyst').trim().split(/\s+/);
+    const parts = (userName || userDesignation || 'Marine Specialist').trim().split(/\s+/);
     if (parts.length >= 2) {
       return (parts[0][0] + parts[1][0]).toUpperCase();
     }
-    return userDesignation.slice(0, 2).toUpperCase();
-  }, [userDesignation]);
+    return (userName || userDesignation || 'MS').slice(0, 2).toUpperCase();
+  }, [userName, userDesignation]);
 
   // Click outside listener for profile dropdown
   useEffect(() => {
@@ -404,8 +419,34 @@ export const Topbar = ({
 
   const handleLogout = () => {
     localStorage.removeItem('sonar_user_session');
+    localStorage.removeItem('sonar_user_id');
+    localStorage.removeItem('sonar_user_email');
+    localStorage.removeItem('sonar_user_name');
+    localStorage.removeItem('sonar_user_designation');
+    localStorage.removeItem('sonar_user_station_id');
     setIsProfileOpen(false);
     navigate('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (userId === 'USR-TESTER-001') {
+      setDeleteError('The default demo tester account is protected from deletion to preserve demonstration benchmarks. Please register a custom account to test full account deletion.');
+      return;
+    }
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      await authService.deleteAccount();
+      localStorage.clear();
+      setShowDeleteModal(false);
+      navigate('/');
+    } catch (err) {
+      console.error('Failed to delete account:', err);
+      const msg = err.response?.data?.detail || err.message || 'Failed to delete account and data.';
+      setDeleteError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   // Load targets for global omnisearch
@@ -784,19 +825,22 @@ export const Topbar = ({
                     </div>
                     <div className="overflow-hidden">
                       <div className="text-xs font-bold text-[#0B192C] truncate">
-                        {userDesignation}
+                        {userName || 'Marine Specialist'}
+                      </div>
+                      <div className="text-[11px] text-[#0284C7] font-mono truncate">
+                        {userEmail}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-[10px] font-mono text-[#0284C7] font-semibold">
-                          {stationId} &bull; Clearance L3
+                        <span className="text-[10px] font-mono text-slate-500 font-medium">
+                          {userDesignation}
                         </span>
                       </div>
                     </div>
                   </div>
                   <div className="mt-2 text-[10px] font-mono text-[#64748B] bg-white px-2 py-1 rounded-md border border-[#E2E8F0] flex items-center justify-between">
-                    <span>ROLE: OPERATIONAL</span>
-                    <span className="text-emerald-600 font-bold">AUTHENTICATED</span>
+                    <span>ID: {userId}</span>
+                    <span className="text-emerald-600 font-bold">SOVEREIGN WORKSPACE</span>
                   </div>
                 </div>
 
@@ -835,14 +879,22 @@ export const Topbar = ({
                   </button>
                 </div>
 
-                {/* Divider & Operational Sign Out */}
-                <div className="border-t border-[#F1F5F9] pt-1.5 px-2">
+                {/* Divider & Operational Sign Out / Account Deletion */}
+                <div className="border-t border-[#F1F5F9] pt-1.5 px-2 space-y-1">
                   <button
                     onClick={handleLogout}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-100 font-semibold transition text-xs text-left cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4 text-slate-500" />
+                    <span>Log Out (Switch Account)</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setIsProfileOpen(false); setShowDeleteModal(true); setDeleteError(''); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700 font-semibold transition text-xs text-left cursor-pointer"
                   >
-                    <LogOut className="w-4 h-4 text-red-500" />
-                    <span>Log Out (Terminate Session)</span>
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                    <span>Delete Account & Wipe Data</span>
                   </button>
                 </div>
               </div>
@@ -973,6 +1025,92 @@ export const Topbar = ({
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent Account & Data Deletion Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-[#0B192C]/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-arrival">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-red-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Delete Account & Wipe Cloud Workspace
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Permanently erase your identity and all sovereign data assets.
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowDeleteModal(false); setDeleteError(''); }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-red-50/70 border border-red-200 rounded-xl p-3.5 text-xs text-red-800 space-y-2">
+              <p className="font-semibold text-red-900">
+                Are you sure you want to permanently delete account:
+              </p>
+              <div className="font-mono text-[11px] bg-white p-2 rounded border border-red-200 text-red-950 select-all">
+                {userEmail} <span className="text-slate-400">({userId})</span>
+              </div>
+              <ul className="list-disc pl-4 space-y-1 text-[11px] text-red-800/90">
+                <li>All survey missions and hydrographic tracks in Neon PostgreSQL</li>
+                <li>All consolidated targets and multi-pass sonar observations</li>
+                <li>All uploaded acoustic images in Neon Object Storage (<code className="font-mono">sagar-images</code>)</li>
+              </ul>
+              <p className="font-bold text-[11px] text-red-900">
+                This action is immediate and cannot be recovered.
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-snug">
+                ⚠️ {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => { setShowDeleteModal(false); setDeleteError(''); }}
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              {userId === 'USR-TESTER-001' ? (
+                <div className="text-[11px] text-slate-500 italic bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
+                  Tester Sandbox Protected
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDeleteAccount}
+                  disabled={deleteLoading}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  {deleteLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Wiping Data & Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Permanently Delete Everything</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

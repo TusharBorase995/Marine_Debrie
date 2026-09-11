@@ -10,7 +10,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from mock_data import db_mock
-from app.api import missions, detections, targets, surveys, jobs, vessel, reports, websocket, ml_integration, images
+from app.api import missions, detections, targets, surveys, jobs, vessel, reports, websocket, ml_integration, images, auth
 
 app = FastAPI(
     title="PS 26057 - AI Marine Debris Operations System Backend",
@@ -36,6 +36,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/detections", StaticFiles(directory=DETECTIONS_DIR), name="detections")
 
 # Mount API & WebSocket Routers
+app.include_router(auth.router)
 app.include_router(missions.router)
 app.include_router(detections.router)
 app.include_router(targets.router)
@@ -48,12 +49,6 @@ app.include_router(websocket.router)
 app.include_router(images.router)
 
 from app.db import init_tables, repo
-
-# Initialize database schema tables immediately
-try:
-    init_tables()
-except Exception as e:
-    print(f"[DB] Init tables warning: {e}")
 
 @app.on_event("startup")
 def on_startup():
