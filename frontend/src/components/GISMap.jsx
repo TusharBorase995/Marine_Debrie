@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 're
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Maximize2, ExternalLink, Layers, Check, Sparkles, Plus, Minus } from 'lucide-react';
-import { consolidateDetectionsToTargets } from '../services/targetService';
+import { consolidateDetectionsToTargets, extractImageKeys } from '../services/targetService';
 import { MAP_CONFIG } from '../config/mapConfig';
 import { formatConfidence, formatClassLabel, formatSize } from '../utils/formatters';
 
@@ -18,19 +18,37 @@ const sonarRadarStyles = `
 
 /**
  * Technical Marine Target Marker Icon (ONE PHYSICAL TARGET = ONE GIS MARKER)
- * Supports real-time new detection ripple animation & selected focus state.
+ * Color Coding Specification:
+ * - Selected Target: Cyan Focus Reticle (#06B6D4) with rotating dashed halo
+ * - Sibling in same frame of selected target:
+ *   - Pending: PURPLE DOT (#A855F7) with purple dashed ring & FRAME indicator
+ *   - Confirmed/Accepted: GREEN (#10B981) with purple frame ring
+ *   - Rejected: RED (#EF4444) with purple frame ring
+ * - Other targets outside active frame:
+ *   - Pending: ORANGE (#F59E0B)
+ *   - Confirmed/Accepted: GREEN (#10B981)
+ *   - Rejected: RED (#EF4444)
  */
-const createPhysicalTargetIcon = (status, isSelected, isNewlyDetected = false, obsCount = 1) => {
+const createPhysicalTargetIcon = (status, isSelected, isSiblingInFrame = false, isNewlyDetected = false, obsCount = 1) => {
   const normalized = status ? status.toLowerCase() : 'pending';
-  const colorMap = {
-    verified: '#10B981',
-    confirmed: '#10B981',
-    pending_review: '#F59E0B',
-    pending: '#F59E0B',
-    rejected: '#EF4444'
-  };
-  const color = isSelected ? '#06B6D4' : (colorMap[normalized] || '#06B6D4');
-  const size = isSelected ? 36 : 28;
+  const isAccepted = normalized === 'verified' || normalized === 'confirmed';
+  const isRejected = normalized === 'rejected';
+  const isPending = !isAccepted && !isRejected;
+
+  let color;
+  if (isSelected) {
+    color = '#06B6D4';
+  } else if (isSiblingInFrame && isPending) {
+    color = '#A855F7'; // PURPLE DOT for siblings in same frame
+  } else if (isAccepted) {
+    color = '#10B981'; // GREEN after accept
+  } else if (isRejected) {
+    color = '#EF4444'; // RED after reject
+  } else {
+    color = '#F59E0B'; // ORANGE for pending
+  }
+
+  const size = isSelected ? 36 : (isSiblingInFrame ? 32 : 28);
 
   const svgHtml = `
     <div style="position: relative; width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
@@ -53,23 +71,45 @@ const createPhysicalTargetIcon = (status, isSelected, isNewlyDetected = false, o
       ${isSelected ? `
         <div style="
           position: absolute;
-          width: ${size + 10}px;
-          height: ${size + 10}px;
+          width: ${size + 12}px;
+          height: ${size + 12}px;
           border-radius: 50%;
-          border: 1.8px dashed #06B6D4;
+          border: 2px dashed #06B6D4;
           animation: spin 8s linear infinite;
           pointer-events: none;
         "></div>
       ` : ''}
 
+      <!-- Sibling In Same Frame Halo -->
+      ${isSiblingInFrame && !isSelected ? `
+        <div style="
+          position: absolute;
+          width: ${size + 10}px;
+          height: ${size + 10}px;
+          border-radius: 50%;
+          border: 1.8px dashed #A855F7;
+          background: rgba(168, 85, 247, 0.16);
+          box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+          pointer-events: none;
+        "></div>
+      ` : ''}
+
       <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="10" fill="${color}" fill-opacity="${isSelected ? '0.35' : '0.20'}" stroke="${color}" stroke-width="${isSelected ? '2.8' : '2'}"/>
+        <circle cx="12" cy="12" r="10" fill="${color}" fill-opacity="${isSelected ? '0.35' : (isSiblingInFrame ? '0.30' : '0.20')}" stroke="${color}" stroke-width="${isSelected ? '2.8' : (isSiblingInFrame ? '2.4' : '2')}"/>
         <circle cx="12" cy="12" r="4.5" fill="${color}" stroke="#FFFFFF" stroke-width="1.8"/>
         ${isSelected ? `<circle cx="12" cy="12" r="7.5" stroke="#FFFFFF" stroke-width="1.2" stroke-dasharray="2 2"/>` : ''}
+        ${isSiblingInFrame && !isSelected ? `<circle cx="12" cy="12" r="7.5" stroke="#FFFFFF" stroke-width="1.0" stroke-dasharray="2 2"/>` : ''}
       </svg>
 
+      <!-- Same Frame Indicator Badge -->
+      ${isSiblingInFrame && !isSelected ? `
+        <span style="position: absolute; bottom: -6px; background: #A855F7; color: #FFFFFF; font-family: ui-monospace, monospace; font-size: 7.5px; font-weight: 800; padding: 1px 3px; border-radius: 3px; border: 1px solid #FFFFFF; line-height: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.35);">
+          FRAME
+        </span>
+      ` : ''}
+
       <!-- Multi-Pass Observation Badge -->
-      ${obsCount > 1 ? `
+      ${obsCount > 1 && (!isSiblingInFrame || isSelected) ? `
         <span style="position: absolute; top: -5px; right: -7px; background: ${color}; color: #FFFFFF; font-family: ui-monospace, monospace; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 9999px; border: 1.5px solid #FFFFFF; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.25);">
           ${obsCount}x
         </span>
@@ -172,6 +212,7 @@ function SurveyViewportController({
 
 export const GISMap = ({ 
   targets = null,
+  allTargets = null,
   detections = [], 
   vesselTrack = [], 
   center = null, 
@@ -213,6 +254,28 @@ export const GISMap = ({
   // Consolidate detections into unique physical targets (strictly ONE marker per physical object)
   const physicalTargets = useMemo(() => {
     if (targets && targets.length > 0) {
+      // If targets already have target_id and are well-formed objects, preserve them directly!
+      const isAlreadyConsolidated = targets.some(t => t.target_id || (t.observations && t.observations.length > 0));
+      if (isAlreadyConsolidated) {
+        return targets.map(t => ({
+          ...t,
+          target_id: t.target_id || t.id,
+          id: t.target_id || t.id,
+          class: t.class || t.category || 'debris_net',
+          category: t.category || t.class || 'debris_net',
+          label: t.label || t.target_label || `Physical Target (${t.target_id || t.id})`,
+          latitude: t.latitude,
+          longitude: t.longitude,
+          estimated_size_m: t.estimated_size_m || 3.0,
+          status: t.status || t.human_review_status || 'pending_review',
+          human_review_status: t.human_review_status || t.status || 'pending',
+          confidence: t.fused_confidence ?? t.confidence ?? 0.85,
+          fused_confidence: t.fused_confidence ?? t.confidence ?? 0.85,
+          observation_count: t.observation_count || t.observations?.length || 1,
+          sonar_image_ref: t.sonar_image_ref || t.image_url || t.observations?.[0]?.sonar_image_ref,
+          observations: t.observations || [t]
+        }));
+      }
       return consolidateDetectionsToTargets(
         targets.flatMap(t => t.observations && t.observations.length > 0 ? t.observations : [t])
       );
@@ -223,11 +286,25 @@ export const GISMap = ({
   const activeSelectedId = selectedTargetId || selectedDetectionId;
   const selectedTargetObj = useMemo(() => {
     if (!activeSelectedId) return null;
-    return physicalTargets.find(t => 
+    const foundInPhysical = physicalTargets.find(t => 
       (t.target_id || t.id) === activeSelectedId || 
       t.observations?.some(o => o.id === activeSelectedId)
     );
-  }, [physicalTargets, activeSelectedId]);
+    if (foundInPhysical) return foundInPhysical;
+    if (allTargets && allTargets.length > 0) {
+      return allTargets.find(t => 
+        (t.target_id || t.id) === activeSelectedId || 
+        t.observations?.some(o => o.id === activeSelectedId)
+      ) || null;
+    }
+    return null;
+  }, [physicalTargets, allTargets, activeSelectedId]);
+
+  // Extract all frame keys for the currently selected target
+  const selectedTargetKeys = useMemo(() => {
+    if (!selectedTargetObj) return [];
+    return extractImageKeys(selectedTargetObj);
+  }, [selectedTargetObj]);
 
   // Operational Target Area Bounds for Fit-to-Bounds (Manual on-demand action only)
   const targetAreaBounds = useMemo(() => {
@@ -262,8 +339,18 @@ export const GISMap = ({
   const initialZoom = zoom || MAP_CONFIG.defaultZoom || 13;
 
   const handleMarkerClick = (tgt) => {
-    if (onSelectTarget) onSelectTarget(tgt);
-    if (onSelectDetection) onSelectDetection(tgt);
+    const richTarget = (allTargets || []).find(t => (t.target_id || t.id) === (tgt.target_id || tgt.id)) || tgt;
+    if (onSelectTarget) onSelectTarget(richTarget);
+    if (onSelectDetection) onSelectDetection(richTarget);
+  };
+
+  const handleOpenEvidenceClick = (tgt) => {
+    const richTarget = (allTargets || []).find(t => (t.target_id || t.id) === (tgt.target_id || tgt.id)) || tgt;
+    if (onOpenEvidence) {
+      onOpenEvidence(richTarget);
+    } else {
+      handleMarkerClick(richTarget);
+    }
   };
 
   const handleFitSurveyArea = () => {
@@ -312,12 +399,21 @@ export const GISMap = ({
           const targetId = tgt.target_id || tgt.id;
           const isSelected = activeSelectedId === targetId || 
             tgt.observations?.some(o => o.id === activeSelectedId);
+
+          // Check if tgt is a sibling in the same image frame as selected target
+          const isSiblingInFrame = Boolean(
+            selectedTargetObj && 
+            !isSelected && 
+            selectedTargetKeys.length > 0 && 
+            extractImageKeys(tgt).some(k => selectedTargetKeys.includes(k))
+          );
+
           const isNew = newlyDetectedTargetId === targetId;
           const targetClass = tgt.class || tgt.category || 'debris_net';
           const classLabel = formatClassLabel(targetClass);
           const status = tgt.status || tgt.human_review_status || 'pending_review';
           const obsCount = tgt.observation_count || tgt.observations?.length || 1;
-          const icon = createPhysicalTargetIcon(status, isSelected, isNew, obsCount);
+          const icon = createPhysicalTargetIcon(status, isSelected, isSiblingInFrame, isNew, obsCount);
 
           const conf = tgt.fused_confidence ?? tgt.confidence ?? 0.85;
           const formattedConf = formatConfidence(conf);
@@ -329,7 +425,7 @@ export const GISMap = ({
               key={targetId} 
               position={[tgt.latitude, tgt.longitude]} 
               icon={icon}
-              zIndexOffset={isSelected ? 600 : (isNew ? 550 : 200)}
+              zIndexOffset={isSelected ? 600 : (isSiblingInFrame ? 575 : (isNew ? 550 : 200))}
               eventHandlers={{
                 click: () => handleMarkerClick(tgt)
               }}
@@ -351,14 +447,26 @@ export const GISMap = ({
                     </span>
                   </div>
 
+                  {/* Sibling Frame Badge if sharing frame with active target */}
+                  {isSiblingInFrame && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-purple-950/90 border border-purple-500/60 text-purple-300 text-[9px] font-bold font-mono">
+                      <span className="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(168,85,247,0.8)] shrink-0"></span>
+                      SAME FRAME AS ACTIVE TARGET
+                    </div>
+                  )}
+
                   {/* Sonar Evidence Thumbnail & Identification */}
                   <div className="flex gap-2.5 items-center">
-                    <div className="w-16 h-14 bg-black rounded overflow-hidden shrink-0 border border-[#1E3154] flex items-center justify-center">
+                    <div 
+                      onClick={() => handleOpenEvidenceClick(tgt)}
+                      className="w-16 h-14 bg-black rounded overflow-hidden shrink-0 border border-[#1E3154] hover:border-purple-500 flex items-center justify-center cursor-pointer transition group"
+                      title="Click to inspect full sonar evidence frame"
+                    >
                       {imageSrc ? (
                         <img
                           src={imageSrc}
                           alt={classLabel}
-                          className="w-full h-full object-cover contrast-125"
+                          className="w-full h-full object-cover contrast-125 group-hover:scale-105 transition duration-200"
                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
                       ) : (
@@ -386,13 +494,7 @@ export const GISMap = ({
 
                   {/* Inspect Button opening full sonar evidence viewer */}
                   <button 
-                    onClick={() => {
-                      if (onOpenEvidence) {
-                        onOpenEvidence(tgt);
-                      } else {
-                        handleMarkerClick(tgt);
-                      }
-                    }}
+                    onClick={() => handleOpenEvidenceClick(tgt)}
                     className="w-full py-1.5 px-3 bg-[#0284C7] hover:bg-[#0369A1] text-white rounded text-xs font-mono font-bold text-center transition flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(2,132,199,0.3)] cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />

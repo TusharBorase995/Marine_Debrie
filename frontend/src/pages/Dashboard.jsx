@@ -637,6 +637,7 @@ export default function Dashboard() {
           <div className="relative h-64 rounded-xl overflow-hidden border border-[#E2E8F0] shadow-2xs">
             <GISMap
               targets={filteredTargets}
+              allTargets={targets}
               detections={filteredDetections}
               selectedTargetId={selectedTargetId}
               newlyDetectedTargetId={newlyDetectedId}

@@ -92,7 +92,42 @@ export const targetService = {
     return res.data;
   },
 
-  consolidateDetectionsToTargets
+  async reviewTarget(targetId, action) {
+    return this.review(targetId, action);
+  },
+
+  consolidateDetectionsToTargets,
+  extractImageKeys
+};
+
+/**
+ * Normalizes and extracts all acoustic frame identifiers from a target or observation.
+ * Matches across multi-pass sonar frames, image IDs, and relative paths.
+ */
+export const extractImageKeys = (tgt) => {
+  if (!tgt) return [];
+  const keys = new Set();
+  const add = (v) => {
+    if (!v || typeof v !== 'string') return;
+    const base = v.split('/').pop().split('?')[0];
+    if (base) {
+      keys.add(base);
+      const noExt = base.replace(/\.[^/.]+$/, '');
+      keys.add(noExt);
+      const prefix = noExt.match(/^(IMG-[A-Za-z0-9_-]+)-\d+$/);
+      if (prefix) keys.add(prefix[1]);
+    }
+  };
+
+  add(tgt.image_id);
+  add(tgt.sonar_image_ref);
+  if (Array.isArray(tgt.observations)) {
+    tgt.observations.forEach(o => {
+      add(o.image_id);
+      add(o.sonar_image_ref);
+    });
+  }
+  return Array.from(keys);
 };
 
 export default targetService;

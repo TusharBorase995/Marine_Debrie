@@ -14,7 +14,7 @@ import {
   getStatusBadgeInfo,
   normalizeStatus
 } from '../utils/formatters';
-import targetService from '../services/targetService';
+import targetService, { extractImageKeys } from '../services/targetService';
 import detectionService from '../services/detectionService';
 
 /**
@@ -38,6 +38,7 @@ export default function EvidenceViewerModal({
 }) {
   const [activeTargetId, setActiveTargetId] = useState(target?.target_id || target?.id);
   const [hoveredTargetId, setHoveredTargetId] = useState(null);
+  const [siblingStatusMap, setSiblingStatusMap] = useState({});
 
   // Zoom & Pan state
   const [zoom, setZoom] = useState(1);
@@ -61,19 +62,53 @@ export default function EvidenceViewerModal({
     }
   }, [target]);
 
-  // Find all sibling targets sharing the exact same sonar_image_ref
-  const activeImageRef = target?.sonar_image_ref || null;
+  // Find all sibling targets sharing the acoustic frame across passes
+  const targetKeys = useMemo(() => extractImageKeys(target), [target]);
+  const activeImageRef = target?.sonar_image_ref || target?.observations?.[0]?.sonar_image_ref || null;
+
   const siblingTargets = useMemo(() => {
-    if (!activeImageRef || !allTargets || allTargets.length === 0) {
-      return target ? [target] : [];
-    }
-    const matching = allTargets.filter(t => t.sonar_image_ref === activeImageRef);
-    // Ensure current target is included if not in array
-    if (target && !matching.some(m => (m.target_id || m.id) === (target.target_id || target.id))) {
+    if (!target) return [];
+    if (!allTargets || allTargets.length === 0) return [target];
+
+    const currentTid = target.target_id || target.id;
+    const matching = allTargets.filter(t => {
+      const tid = t.target_id || t.id;
+      if (tid === currentTid) return true;
+      const tKeys = extractImageKeys(t);
+      return tKeys.some(k => targetKeys.includes(k));
+    });
+
+    if (!matching.some(m => (m.target_id || m.id) === currentTid)) {
       matching.unshift(target);
     }
-    return matching.length > 0 ? matching : (target ? [target] : []);
-  }, [activeImageRef, allTargets, target]);
+    return matching;
+  }, [target, allTargets, targetKeys]);
+
+  // Helper to resolve geometry for any sibling target on the active image frame
+  const resolveTargetGeometry = (tgt) => {
+    if (!tgt) return { segmentation: null, bounding_box: null, obs: null };
+    const currentFrameKeys = extractImageKeys({ sonar_image_ref: activeImageRef });
+
+    if (Array.isArray(tgt.observations) && tgt.observations.length > 0) {
+      const match = tgt.observations.find(o => {
+        const oKeys = extractImageKeys(o);
+        return oKeys.some(k => currentFrameKeys.includes(k));
+      });
+      if (match && (match.segmentation || match.bounding_box)) {
+        return {
+          segmentation: match.segmentation,
+          bounding_box: match.bounding_box,
+          obs: match
+        };
+      }
+    }
+
+    return {
+      segmentation: tgt.segmentation || tgt.observations?.[0]?.segmentation,
+      bounding_box: tgt.bounding_box || tgt.observations?.[0]?.bounding_box,
+      obs: tgt.observations?.[0] || null
+    };
+  };
 
   // The currently active target object
   const activeTarget = useMemo(() => {
@@ -158,10 +193,12 @@ export default function EvidenceViewerModal({
     const tid = activeTarget.target_id || activeTarget.id;
     try {
       setReviewing(true);
-      const res = await targetService.reviewTarget(tid, action);
+      const reviewFn = targetService.review || targetService.reviewTarget || detectionService.review;
+      const res = await reviewFn(tid, action);
       const updatedStatus = res?.status || (action === 'confirm' ? 'confirmed' : action === 'reject' ? 'rejected' : 'pending_review');
       activeTarget.status = updatedStatus;
       activeTarget.human_review_status = updatedStatus;
+      setSiblingStatusMap(prev => ({ ...prev, [tid]: updatedStatus }));
       onTargetReviewed?.(tid, updatedStatus);
     } catch (err) {
       console.error('Failed to update review status:', err);
@@ -318,12 +355,29 @@ export default function EvidenceViewerModal({
                       const tid = tgt.target_id || tgt.id;
                       const isActive = tid === activeTargetId;
                       const isHovered = tid === hoveredTargetId;
+                      const currentStatus = siblingStatusMap[tid] || tgt.status || tgt.human_review_status || 'pending_review';
+                      const normStatus = normalizeStatus(currentStatus);
 
-                      let segmentation = tgt.segmentation || tgt.observations?.[0]?.segmentation;
+                      // Dynamic color coding according to status:
+                      // Confirmed -> Green (#10B981)
+                      // Rejected -> Red (#EF4444)
+                      // Pending -> Purple (#A855F7)
+                      let statusColor = '#A855F7';
+                      if (normStatus === 'confirmed') statusColor = '#10B981';
+                      else if (normStatus === 'rejected') statusColor = '#EF4444';
+
+                      const strokeColor = isActive ? '#06B6D4' : (isHovered ? '#A855F7' : statusColor);
+                      const strokeWidth = isActive ? 3.5 : (isHovered ? 2.5 : 1.8);
+                      const fillColor = isActive 
+                        ? 'rgba(6, 182, 212, 0.25)' 
+                        : (isHovered ? 'rgba(168, 85, 247, 0.20)' : `${statusColor}18`);
+
+                      const geom = resolveTargetGeometry(tgt);
+                      let segmentation = geom.segmentation;
                       if (typeof segmentation === 'string') {
                         try { segmentation = JSON.parse(segmentation); } catch (_) {}
                       }
-                      let rawBBox = tgt.bounding_box || tgt.observations?.[0]?.bounding_box;
+                      let rawBBox = geom.bounding_box;
                       if (typeof rawBBox === 'string') {
                         try { rawBBox = JSON.parse(rawBBox); } catch (_) {}
                       }
@@ -373,13 +427,6 @@ export default function EvidenceViewerModal({
                         return null;
                       }
 
-                      // Clean styling based on active/hovered state
-                      const strokeColor = isActive ? '#4F46E5' : (isHovered ? '#6366F1' : '#10B981');
-                      const strokeWidth = isActive ? 3.5 : (isHovered ? 2.5 : 1.8);
-                      const fillColor = isActive 
-                        ? 'rgba(79, 70, 229, 0.28)' 
-                        : (isHovered ? 'rgba(99, 102, 241, 0.20)' : 'rgba(16, 185, 129, 0.12)');
-
                       // Top-left label positioning
                       let labelX = 0;
                       let labelY = 0;
@@ -405,18 +452,35 @@ export default function EvidenceViewerModal({
                           onMouseEnter={() => setHoveredTargetId(tid)}
                           onMouseLeave={() => setHoveredTargetId(null)}
                         >
-                          {hasPolygon ? (
+                          {hasPolygon && (
                             /* 1. Segmentation Polygon (Preferred) */
-                            <polygon
-                              points={segmentation.map(p => `${p[0]},${p[1]}`).join(' ')}
-                              stroke={strokeColor}
-                              strokeWidth={strokeWidth}
-                              fill={fillColor}
-                              strokeLinejoin="round"
-                              strokeLinecap="round"
-                              strokeDasharray={isActive ? undefined : (isHovered ? undefined : '5,3')}
-                            />
-                          ) : (
+                            <g>
+                              <polygon
+                                points={segmentation.map(p => `${p[0]},${p[1]}`).join(' ')}
+                                stroke={strokeColor}
+                                strokeWidth={strokeWidth}
+                                fill={fillColor}
+                                strokeLinejoin="round"
+                                strokeLinecap="round"
+                                strokeDasharray={isActive ? undefined : (isHovered ? undefined : '5,3')}
+                              />
+                              {/* White vertex handles matching Screenshot 1 */}
+                              {segmentation.map((pt, pIdx) => (
+                                <circle
+                                  key={pIdx}
+                                  cx={pt[0]}
+                                  cy={pt[1]}
+                                  r={isActive ? 3.5 : 2.5}
+                                  fill="#FFFFFF"
+                                  stroke={strokeColor}
+                                  strokeWidth={1.5}
+                                  pointerEvents="none"
+                                />
+                              ))}
+                            </g>
+                          )}
+
+                          {hasBox && !hasPolygon && (
                             /* 2. Bounding Box Fallback */
                             <rect
                               x={parsedBox.x}
@@ -439,7 +503,7 @@ export default function EvidenceViewerModal({
                               width={Math.max(90, (tid.length + (tgt.class || '').length) * 6.5 + 24)}
                               height="18"
                               rx="4"
-                              fill={isActive ? '#4F46E5' : '#0F172A'}
+                              fill={isActive ? '#06B6D4' : '#0F172A'}
                               stroke={strokeColor}
                               strokeWidth="1.2"
                               opacity={0.92}
@@ -512,29 +576,36 @@ export default function EvidenceViewerModal({
             
             {/* 1. Sibling Targets Switcher (When frame has >= 1 target) */}
             {siblingTargets.length > 0 && (
-              <div className="p-4 space-y-2 bg-slate-50 border-b border-slate-200">
+              <div className="p-4 space-y-2.5 bg-slate-50 border-b border-slate-200">
                 <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
                   <span className="flex items-center gap-1.5 text-slate-700">
-                    <Target className="w-3.5 h-3.5 text-indigo-600" /> Targets in this Frame
+                    <Target className="w-3.5 h-3.5 text-indigo-600" /> TARGETS IN THIS FRAME
                   </span>
-                  <span>{siblingTargets.length} Recorded</span>
+                  <span className="font-extrabold text-slate-700">{siblingTargets.length} RECORDED</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {siblingTargets.map((t) => {
                     const tid = t.target_id || t.id;
                     const isActive = tid === activeTargetId;
                     const cls = formatClassLabel(t.class || t.category);
+                    const currentStatus = siblingStatusMap[tid] || t.status || t.human_review_status || 'pending_review';
+                    const normStatus = normalizeStatus(currentStatus);
+
+                    let dotColorClass = 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]';
+                    if (normStatus === 'confirmed') dotColorClass = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]';
+                    else if (normStatus === 'rejected') dotColorClass = 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]';
+
                     return (
                       <button
                         key={tid}
                         onClick={() => selectTarget(t)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 cursor-pointer border ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-2 cursor-pointer border ${
                           isActive
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm ring-2 ring-indigo-500/30'
                             : 'bg-white text-slate-700 hover:text-slate-900 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-indigo-400' : 'bg-slate-400'}`} />
+                        <span className={`w-2 h-2 rounded-full ${dotColorClass} shrink-0`} />
                         <span>{tid}</span>
                         <span className={`text-[10px] font-sans font-normal ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
                           ({cls})

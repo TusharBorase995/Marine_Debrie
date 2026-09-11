@@ -22,7 +22,8 @@ export default function MapPage() {
     isInitialLoading,
     isRefreshing,
     refreshData,
-    reviewTarget
+    reviewTarget,
+    deleteTarget
   } = useMission();
 
   const [selectedTarget, setSelectedTarget] = useState(null);
@@ -216,6 +217,7 @@ export default function MapPage() {
         <div className="flex-1 h-full">
           <GISMap
             targets={filteredTargets}
+            allTargets={targets}
             vesselTrack={vesselTrack}
             selectedTargetId={selectedTarget?.target_id || selectedTarget?.id}
             newlyDetectedTargetId={newlyDetectedId}
@@ -229,10 +231,9 @@ export default function MapPage() {
         {isEvidenceOpen && selectedTarget && (
           <EvidenceViewerModal
             target={selectedTarget}
-            allTargets={filteredTargets}
+            allTargets={targets}
             onClose={() => {
               setIsEvidenceOpen(false);
-              setSelectedTarget(null);
             }}
             onTargetSelect={(t) => {
               setSelectedTarget(t);
@@ -240,6 +241,9 @@ export default function MapPage() {
             }}
             onTargetReviewed={(tid, newStatus) => {
               handleReview(tid, newStatus);
+            }}
+            onTargetDeleted={(tid) => {
+              deleteTarget?.(tid);
             }}
           />
         )}
