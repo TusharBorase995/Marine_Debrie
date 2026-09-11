@@ -4,6 +4,16 @@ A unified hydrographic survey and marine hazard detection dashboard designed to 
 
 ---
 
+## 🌐 Live Cloud Deployment
+
+* **Production Web App (Vercel)**: [https://marine-debrie.vercel.app](https://marine-debrie.vercel.app)
+* **Backend API Service (Render)**: [https://marine-debrie.onrender.com](https://marine-debrie.onrender.com)
+* **Interactive Swagger Docs**: [https://marine-debrie.onrender.com/docs](https://marine-debrie.onrender.com/docs)
+* **System Health Endpoint**: [https://marine-debrie.onrender.com/api/health](https://marine-debrie.onrender.com/api/health)
+* **Cloud Database & Storage**: Neon Serverless PostgreSQL + Neon S3 Object Storage
+
+---
+
 ## Quick Start
 
 > 📖 **Looking for full step-by-step terminal commands, troubleshooting, and API testing?**
