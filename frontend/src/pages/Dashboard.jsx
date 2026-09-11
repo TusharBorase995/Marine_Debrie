@@ -31,146 +31,61 @@ export default function Dashboard() {
     setSelectedMissionId, 
     selectedMission,
     selectedTargetId,
-    setSelectedTargetId
+    setSelectedTargetId,
+    targets,
+    setTargets,
+    detections,
+    setDetections,
+    vesselTelemetry,
+    healthData,
+    lastUpdatedTime,
+    isInitialLoading,
+    isRefreshing,
+    refreshData,
+    reviewTarget,
+    deleteTarget
   } = useMission();
 
-  const [targets, setTargets] = useState([]);
-  const [detections, setDetections] = useState([]);
-  const [healthData, setHealthData] = useState(null);
-  const [vesselTelemetry, setVesselTelemetry] = useState(null);
-  const [lastUpdatedTime, setLastUpdatedTime] = useState('');
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isEvidenceModalOpen, setIsEvidenceModalOpen] = useState(false);
   const [newlyDetectedId, setNewlyDetectedId] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [activityTimeframe, setActivityTimeframe] = useState('7d');
 
   // Real-Time WebSocket live feed
   const { connected: wsConnected, data: wsData } = useWebSocket('/ws/live-feed');
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const [targetsRes, detectionsRes, healthRes, telemetryRes] = await Promise.allSettled([
-        targetService.getAll(),
-        detectionService.getAll(),
-        axios.get('/api/health'),
-        axios.get('/api/vessel-track/telemetry')
-      ]);
-
-      const validTargets = targetsRes.status === 'fulfilled' && Array.isArray(targetsRes.value) ? targetsRes.value : [];
-      const validDetections = detectionsRes.status === 'fulfilled' && Array.isArray(detectionsRes.value) ? detectionsRes.value : [];
-      
-      setTargets(validTargets);
-      setDetections(validDetections);
-
-      if (healthRes.status === 'fulfilled' && healthRes.value?.data) {
-        setHealthData(healthRes.value.data);
-      }
-      if (telemetryRes.status === 'fulfilled' && telemetryRes.value?.data) {
-        setVesselTelemetry(telemetryRes.value.data);
-      }
-
-      // Update real live timestamp
-      const now = new Date();
-      setLastUpdatedTime(now.toUTCString().replace('GMT', 'UTC'));
-
-      // Auto-select target from context or first available
-      const targetToPick = selectedTargetId 
-        ? validTargets.find(t => (t.target_id || t.id) === selectedTargetId)
-        : (validTargets.length > 0 ? validTargets[0] : null);
-      
-      setSelectedTarget(targetToPick || null);
-    } catch (err) {
-      console.error("Dashboard fetch error:", err);
-      setTargets([]);
-      setDetections([]);
-      setSelectedTarget(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Silent background revalidation on page mount (0ms delay, instant render)
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    refreshData({ silent: true });
+  }, [refreshData]);
 
-  // Handle live WebSocket incoming detection results & clear events
+  // Keep selected target synchronized with live cached targets
   useEffect(() => {
-    if (!wsData) return;
-
-    // Refresh live timestamp on socket updates
-    const now = new Date();
-    setLastUpdatedTime(now.toUTCString().replace('GMT', 'UTC'));
-
-    if (wsData.type === 'ALL_DETECTIONS_CLEARED') {
-      setTargets([]);
-      setDetections([]);
+    if (targets.length > 0) {
+      if (!selectedTarget) {
+        const targetToPick = selectedTargetId 
+          ? targets.find(t => (t.target_id || t.id) === selectedTargetId)
+          : targets[0];
+        if (targetToPick) setSelectedTarget(targetToPick);
+      } else {
+        const updated = targets.find(t => (t.target_id || t.id) === (selectedTarget.target_id || selectedTarget.id));
+        if (updated) setSelectedTarget(updated);
+      }
+    } else {
       setSelectedTarget(null);
-      return;
     }
+  }, [targets, selectedTargetId]);
 
-    if (wsData.type === 'DETECTIONS_RESET' || wsData.type === 'MISSION_IMPORTED' || wsData.type === 'BATCH_LOADED') {
-      fetchDashboardData();
-      return;
-    }
-
-    if (wsData.type === 'NEW_DETECTION' && wsData.data) {
-      const newDet = wsData.data;
-      const targetId = newDet.target_id || newDet.id;
+  // Visual pulse highlight when a real-time detection arrives
+  useEffect(() => {
+    if (wsData && wsData.type === 'NEW_DETECTION' && wsData.data) {
+      const targetId = wsData.data.target_id || wsData.data.id;
       setNewlyDetectedId(targetId);
-
-      setDetections(prev => [newDet, ...prev.filter(d => d.id !== newDet.id)]);
-      setTargets(prev => {
-        const existingIdx = prev.findIndex(t => (t.target_id || t.id) === targetId);
-        if (existingIdx >= 0) {
-          const updated = { ...prev[existingIdx] };
-          const obs = updated.observations || [];
-          updated.observations = [newDet, ...obs.filter(o => o.id !== newDet.id)];
-          updated.observation_count = updated.observations.length;
-          updated.confidence = newDet.confidence;
-          updated.fused_confidence = newDet.confidence;
-          updated.sonar_image_ref = newDet.sonar_image_ref || updated.sonar_image_ref;
-          const copy = [...prev];
-          copy[existingIdx] = updated;
-          return copy;
-        } else {
-          const newTarget = {
-            target_id: targetId,
-            id: targetId,
-            class: newDet.class,
-            category: newDet.class,
-            label: newDet.target_label || formatClassLabel(newDet.class),
-            latitude: newDet.latitude,
-            longitude: newDet.longitude,
-            estimated_size_m: newDet.estimated_size_m,
-            status: newDet.status || 'pending_review',
-            human_review_status: newDet.status || 'pending_review',
-            confidence: newDet.confidence,
-            fused_confidence: newDet.confidence,
-            observation_count: 1,
-            sonar_image_ref: newDet.sonar_image_ref,
-            mission_id: newDet.mission_id || 'MISSION-LIVE',
-            observations: [newDet]
-          };
-          return [newTarget, ...prev];
-        }
-      });
-
       const timer = setTimeout(() => {
         setNewlyDetectedId(null);
       }, 6000);
       return () => clearTimeout(timer);
-    }
-
-    if (wsData.type === 'TARGET_REVIEWED' && wsData.data) {
-      const { target_id, status } = wsData.data;
-      setTargets(prev => prev.map(t => (t.target_id === target_id || t.id === target_id) ? { ...t, status, human_review_status: status } : t));
-      setDetections(prev => prev.map(d => (d.target_id === target_id || d.id === target_id) ? { ...d, status, human_review_status: status } : d));
-      if (selectedTarget && (selectedTarget.target_id === target_id || selectedTarget.id === target_id)) {
-        setSelectedTarget(prev => ({ ...prev, status, human_review_status: status }));
-      }
     }
   }, [wsData]);
 
@@ -337,13 +252,7 @@ export default function Dashboard() {
   // Handle Analyst Review
   const handleReview = async (targetId, action) => {
     try {
-      const updated = await detectionService.review(targetId, action);
-      const newStatus = updated.status || (action === 'confirm' ? 'confirmed' : 'rejected');
-      setTargets(prev => prev.map(t => (t.target_id === targetId || t.id === targetId) ? { ...t, status: newStatus, human_review_status: newStatus } : t));
-      setDetections(prev => prev.map(d => (d.target_id === targetId || d.id === targetId) ? { ...d, status: newStatus, human_review_status: newStatus } : d));
-      if (selectedTarget && (selectedTarget.target_id === targetId || selectedTarget.id === targetId)) {
-        setSelectedTarget(prev => ({ ...prev, status: newStatus, human_review_status: newStatus }));
-      }
+      await reviewTarget(targetId, action);
     } catch (err) {
       console.error("Review action failed:", err);
     }
@@ -352,9 +261,7 @@ export default function Dashboard() {
   const handleDeleteTarget = async (targetId) => {
     if (window.confirm(`Are you sure you want to permanently delete target ${targetId}?`)) {
       try {
-        await detectionService.delete(targetId);
-        setTargets(prev => prev.filter(t => (t.target_id || t.id) !== targetId));
-        setDetections(prev => prev.filter(d => (d.target_id || d.id) !== targetId));
+        await deleteTarget(targetId);
         setShowDetailModal(false);
         setSelectedTarget(null);
       } catch (err) {

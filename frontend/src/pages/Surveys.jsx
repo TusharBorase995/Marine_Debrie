@@ -15,12 +15,18 @@ export default function Surveys() {
     selectedMissionId, 
     setSelectedMissionId, 
     loadingMissions, 
+    refreshMissions,
     createMission, 
     deleteMission,
     error,
     dbStatus,
     checkDbHealth
   } = useMission();
+
+  // Silent background revalidation on page mount
+  useEffect(() => {
+    refreshMissions();
+  }, []);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -283,7 +289,7 @@ export default function Surveys() {
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs flex items-center gap-2 font-medium">
           <AlertCircle className="w-4 h-4" /> {error}
         </div>
-      ) : loadingMissions ? (
+      ) : (loadingMissions && missions.length === 0) ? (
         <div className="p-12 text-center text-slate-400 text-xs font-mono bg-white rounded-2xl border border-slate-200">
           <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-600" />
           Loading Survey Missions...

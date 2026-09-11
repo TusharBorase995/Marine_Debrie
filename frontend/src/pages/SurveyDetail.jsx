@@ -6,35 +6,48 @@ import detectionService from '../services/detectionService';
 import jobService from '../services/jobService';
 import SonarWaterfall from '../components/SonarWaterfall';
 import { formatClassLabel, formatConfidence, getStatusBadgeInfo } from '../utils/formatters';
+import { useMission } from '../context/MissionContext';
 
 export default function SurveyDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { getSurveyDetail, surveyDetailCache } = useMission();
 
-  const [survey, setSurvey] = useState(null);
-  const [detections, setDetections] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = surveyDetailCache[id];
+  const [survey, setSurvey] = useState(() => cached?.survey || null);
+  const [detections, setDetections] = useState(() => cached?.detections || []);
+  const [loading, setLoading] = useState(() => !cached);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchData = async () => {
-      try {
+      if (surveyDetailCache[id]) {
+        setSurvey(surveyDetailCache[id].survey);
+        setDetections(surveyDetailCache[id].detections);
+        setLoading(false);
+      } else {
         setLoading(true);
-        const [surveyData, detectionData] = await Promise.all([
-          surveyService.getById(id),
-          detectionService.getAll({ survey_id: id })
-        ]);
-        setSurvey(surveyData);
-        setDetections(detectionData);
+      }
+      try {
+        setError(null);
+        const bundle = await getSurveyDetail(id);
+        if (isMounted && bundle) {
+          setSurvey(bundle.survey);
+          setDetections(bundle.detections || []);
+        }
       } catch (err) {
         console.error('Failed to fetch survey details:', err);
-        setError('Failed to load survey data record.');
+        if (isMounted && !surveyDetailCache[id]) {
+          setError('Failed to load survey data record.');
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
     fetchData();
-  }, [id]);
+    return () => { isMounted = false; };
+  }, [id, getSurveyDetail, surveyDetailCache]);
 
   const handleStartProcess = async () => {
     try {

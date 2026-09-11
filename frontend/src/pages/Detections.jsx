@@ -29,13 +29,17 @@ export default function Detections() {
     selectedMissionId, 
     setSelectedMissionId, 
     selectedTargetId, 
-    setSelectedTargetId 
+    setSelectedTargetId,
+    targets,
+    detections,
+    isInitialLoading,
+    isRefreshing,
+    refreshData,
+    reviewTarget,
+    deleteTarget
   } = useMission();
 
   const [viewMode, setViewMode] = useState('table'); // 'table' | 'cards'
-  const [targets, setTargets] = useState([]);
-  const [detections, setDetections] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Search & Filter States (Default missionFilter to ALL so all targets are visible by default!)
@@ -60,46 +64,29 @@ export default function Detections() {
   // Real-Time WebSocket Live Feed Integration
   const { data: wsData } = useWebSocket('/ws/live-feed');
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [targetData, detData] = await Promise.all([
-        targetService.getAll(),
-        detectionService.getAll()
-      ]);
-      const validTargets = Array.isArray(targetData) ? targetData : [];
-      const validDetections = Array.isArray(detData) ? detData : [];
-      setTargets(validTargets);
-      setDetections(validDetections);
-
-      if (validTargets.length > 0) {
-        // Auto-select first target ONLY on initial start
-        if (!initialSelectionDoneRef.current) {
-          setSelectedItem(validTargets[0]);
-          setSelectedTargetId(validTargets[0].target_id || validTargets[0].id);
-          initialSelectionDoneRef.current = true;
-        } else {
-          // If user currently has an item selected, update reference. If null, keep closed!
-          setSelectedItem(prev => {
-            if (!prev) return null;
-            const match = validTargets.find(t => (t.target_id || t.id) === (prev.target_id || prev.id));
-            return match || null;
-          });
-        }
-      } else {
-        setSelectedItem(null);
-      }
-    } catch (err) {
-      console.error('Failed to load targets/detections:', err);
-      setError('Unable to load acoustic target repository.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Silent background revalidation on page mount (0ms delay, instant render)
   useEffect(() => {
-    fetchData();
-  }, []);
+    refreshData({ silent: true });
+  }, [refreshData]);
+
+  // Keep selected item synchronized with live cached targets
+  useEffect(() => {
+    if (targets.length > 0) {
+      if (!initialSelectionDoneRef.current) {
+        setSelectedItem(targets[0]);
+        setSelectedTargetId(targets[0].target_id || targets[0].id);
+        initialSelectionDoneRef.current = true;
+      } else {
+        setSelectedItem(prev => {
+          if (!prev) return null;
+          const match = targets.find(t => (t.target_id || t.id) === (prev.target_id || prev.id));
+          return match || null;
+        });
+      }
+    } else {
+      setSelectedItem(null);
+    }
+  }, [targets, setSelectedTargetId]);
 
   // Synchronize URL query parameters (e.g. from global Topbar search)
   useEffect(() => {
@@ -120,164 +107,34 @@ export default function Detections() {
     }
   }, [searchParams, targets]);
 
-  // Handle incoming WebSocket events
+  // Handle incoming WebSocket events for local UI effects
   useEffect(() => {
     if (!wsData) return;
 
-    if (wsData.type === 'ALL_DETECTIONS_CLEARED') {
-      setTargets([]);
-      setDetections([]);
-      setSelectedItem(null);
-      return;
-    }
-
-    if (wsData.type === 'DETECTIONS_RESET') {
-      fetchData();
-      return;
-    }
-
     if (wsData.type === 'NEW_DETECTION' && wsData.data) {
-      const newDet = wsData.data;
-      const targetId = newDet.target_id || newDet.id;
+      const targetId = wsData.data.target_id || wsData.data.id;
       setRecentNewId(targetId);
-
-      setDetections(prev => [newDet, ...prev.filter(d => d.id !== newDet.id)]);
-      setTargets(prev => {
-        const existingIdx = prev.findIndex(t => (t.target_id || t.id) === targetId);
-        if (existingIdx >= 0) {
-          const updated = { ...prev[existingIdx] };
-          const obs = updated.observations || [];
-          updated.observations = [newDet, ...obs.filter(o => o.id !== newDet.id)];
-          updated.observation_count = updated.observations.length;
-          updated.confidence = newDet.confidence;
-          updated.fused_confidence = newDet.confidence;
-          updated.sonar_image_ref = newDet.sonar_image_ref || updated.sonar_image_ref;
-          const copy = [...prev];
-          copy[existingIdx] = updated;
-          return copy;
-        } else {
-          const newTarget = {
-            target_id: targetId,
-            id: targetId,
-            class: newDet.class,
-            category: newDet.class,
-            label: newDet.target_label || formatClassLabel(newDet.class),
-            latitude: newDet.latitude,
-            longitude: newDet.longitude,
-            estimated_size_m: newDet.estimated_size_m,
-            status: newDet.status || 'pending_review',
-            human_review_status: newDet.status || 'pending_review',
-            confidence: newDet.confidence,
-            fused_confidence: newDet.confidence,
-            observation_count: 1,
-            sonar_image_ref: newDet.sonar_image_ref,
-            mission_id: newDet.mission_id || 'MISSION-001',
-            observations: [newDet]
-          };
-          return [newTarget, ...prev];
-        }
-      });
-
       const timer = setTimeout(() => {
         setRecentNewId(null);
       }, 7000);
       return () => clearTimeout(timer);
     }
 
-    if (wsData.type === 'TARGET_REVIEWED' && wsData.data) {
-      const { target_id, status } = wsData.data;
-      setTargets(prev => prev.map(t => {
-        if (t.target_id === target_id || t.id === target_id) {
-          const updatedObs = (t.observations || []).map(o => ({
-            ...o,
-            status,
-            human_review_status: status
-          }));
-          return {
-            ...t,
-            status,
-            human_review_status: status,
-            observations: updatedObs
-          };
-        }
-        return t;
-      }));
-      setDetections(prev => prev.map(d => (d.target_id === target_id || d.id === target_id) ? { ...d, status, human_review_status: status } : d));
-      if (selectedItem && (selectedItem.target_id === target_id || selectedItem.id === target_id)) {
-        setSelectedItem(prev => {
-          if (!prev) return null;
-          const updatedObs = (prev.observations || []).map(o => ({
-            ...o,
-            status,
-            human_review_status: status
-          }));
-          return {
-            ...prev,
-            status,
-            human_review_status: status,
-            observations: updatedObs
-          };
-        });
-      }
-    }
-
     if (wsData.type === 'TARGET_DELETED' && wsData.data) {
       const deletedId = wsData.data.target_id || wsData.data.id;
-      setTargets(prev => prev.filter(t => (t.target_id || t.id) !== deletedId));
-      setDetections(prev => prev.filter(d => (d.target_id || d.id) !== deletedId));
       setSelectedItem(prev => (prev && (prev.target_id === deletedId || prev.id === deletedId)) ? null : prev);
     }
   }, [wsData]);
 
-  // Execute analyst review action with INSTANT optimistic local state update
+  // Execute analyst review action with INSTANT optimistic update across the entire app
   const handleReviewAction = async (targetId, action, e) => {
     if (e) e.stopPropagation();
-    const newStatus = action === 'confirm' ? 'confirmed' : 'rejected';
-
-    // 1. Optimistic instant local update across targets, detections, and selected target
-    setTargets(prev => prev.map(t => {
-      if (t.target_id === targetId || t.id === targetId) {
-        const updatedObs = (t.observations || []).map(o => ({
-          ...o,
-          status: newStatus,
-          human_review_status: newStatus
-        }));
-        return {
-          ...t,
-          status: newStatus,
-          human_review_status: newStatus,
-          observations: updatedObs
-        };
-      }
-      return t;
-    }));
-
-    setDetections(prev => prev.map(d => {
-      if (d.target_id === targetId || d.id === targetId) {
-        return {
-          ...d,
-          status: newStatus,
-          human_review_status: newStatus
-        };
-      }
-      return d;
-    }));
-
-    // Dismiss / remove the detail panel when review action takes place
-    setSelectedItem(prev => {
-      if (prev && (prev.target_id === targetId || prev.id === targetId)) {
-        return null;
-      }
-      return prev;
-    });
-
-    // 2. Transmit to backend API
     try {
-      await detectionService.review(targetId, action);
+      await reviewTarget(targetId, action);
+      // Dismiss the detail panel when review action takes place
+      setSelectedItem(prev => (prev && (prev.target_id === targetId || prev.id === targetId)) ? null : prev);
     } catch (err) {
       console.error('Review action failed:', err);
-      // Refresh on network error
-      fetchData();
     }
   };
 
@@ -292,19 +149,13 @@ export default function Detections() {
     const targetId = deleteConfirmTarget.target_id || deleteConfirmTarget.id;
     setDeleteLoading(true);
 
-    // Optimistic instant local removal
-    setTargets(prev => prev.filter(t => (t.target_id || t.id) !== targetId));
-    setDetections(prev => prev.filter(d => (d.target_id || d.id) !== targetId));
-    setSelectedItem(prev => (prev && (prev.target_id === targetId || prev.id === targetId)) ? null : prev);
-
     try {
-      await detectionService.delete(targetId);
+      await deleteTarget(targetId);
       setDeleteToast(`Target '${targetId}' was successfully deleted from database.`);
       setTimeout(() => setDeleteToast(null), 4000);
     } catch (err) {
       console.error('Delete target failed:', err);
       setError(`Failed to delete target: ${err.response?.data?.detail || err.message || 'Server error'}`);
-      fetchData(); // Rollback on network failure
     } finally {
       setDeleteLoading(false);
       setDeleteConfirmTarget(null);
@@ -435,6 +286,17 @@ export default function Detections() {
               <LayoutGrid className="w-3.5 h-3.5" /> Cards View
             </button>
           </div>
+
+          {/* Quick Refresh Button */}
+          <button
+            onClick={() => refreshData({ silent: true })}
+            disabled={isRefreshing}
+            className="p-2 rounded-xl border border-[#E2E8F0] bg-[#F4F7FB] hover:bg-white text-[#64748B] hover:text-[#0284C7] text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+            title="Sync latest targets from PostgreSQL"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#0284C7] ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Sync</span>
+          </button>
         </div>
       </div>
 
@@ -555,7 +417,7 @@ export default function Detections() {
         {/* Targets Content Area (8 Cols) */}
         <div className={selectedItem ? "lg:col-span-8 space-y-4" : "lg:col-span-12 space-y-4"}>
           
-          {loading ? (
+          {(isInitialLoading && targets.length === 0) ? (
             <div className="bg-white rounded-2xl p-12 border border-[#E5EDF5] shadow-2xs text-center space-y-2">
               <RefreshCw className="w-6 h-6 animate-spin text-[#0284C7] mx-auto" />
               <span className="text-xs font-mono text-[#64748B] block">Querying hydrographic target repository...</span>

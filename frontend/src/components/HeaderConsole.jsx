@@ -366,10 +366,9 @@ export const Topbar = ({
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [cachedTargets, setCachedTargets] = useState([]);
   const searchInputRef = useRef(null);
   const searchContainerRef = useRef(null);
-  const { missions, setSelectedMissionId, dbStatus, checkDbHealth } = useMission();
+  const { missions, targets: cachedTargets, setSelectedMissionId, dbStatus, checkDbHealth } = useMission();
   const [showDbModal, setShowDbModal] = useState(false);
   const [checkingDb, setCheckingDb] = useState(false);
 
@@ -448,13 +447,6 @@ export const Topbar = ({
       setDeleteLoading(false);
     }
   };
-
-  // Load targets for global omnisearch
-  useEffect(() => {
-    targetService.getAll()
-      .then(res => setCachedTargets(Array.isArray(res) ? res : []))
-      .catch(err => console.warn("Could not load targets for search:", err));
-  }, []);
 
   // Global Ctrl+K / Cmd+K listener
   useEffect(() => {

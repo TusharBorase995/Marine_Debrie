@@ -16,12 +16,15 @@ export default function MapPage() {
     setSelectedMissionId, 
     selectedMission,
     selectedTargetId,
-    setSelectedTargetId
+    setSelectedTargetId,
+    targets,
+    vesselTrack,
+    isInitialLoading,
+    isRefreshing,
+    refreshData,
+    reviewTarget
   } = useMission();
 
-  const [targets, setTargets] = useState([]);
-  const [vesselTrack, setVesselTrack] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const [newlyDetectedId, setNewlyDetectedId] = useState(null);
@@ -32,109 +35,37 @@ export default function MapPage() {
 
   const { data: wsData } = useWebSocket('/ws/live-feed');
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [targetData, trackData] = await Promise.all([
-        targetService.getAll(),
-        mapService.getVesselTrack()
-      ]);
-      setTargets(targetData);
-      const points = Array.isArray(trackData) ? trackData : (trackData?.track_points || []);
-      setVesselTrack(points);
-      
-      // Auto-select target if selectedTargetId is set from context or previous view
-      const targetToSelect = selectedTargetId || selectedTarget?.target_id || selectedTarget?.id;
-      if (targetToSelect) {
-        const found = targetData.find(t => (t.target_id || t.id) === targetToSelect);
-        if (found) setSelectedTarget(found);
-      }
-    } catch (err) {
-      console.error('Failed to load GIS map targets:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Silent background revalidation on page mount (0ms delay, instant render)
   useEffect(() => {
-    fetchData();
-  }, []);
+    refreshData({ silent: true });
+  }, [refreshData]);
 
   // Sync selected target from context if changed from another page
   useEffect(() => {
-    if (selectedTargetId && targets.length > 0) {
-      const found = targets.find(t => (t.target_id || t.id) === selectedTargetId);
-      if (found) setSelectedTarget(found);
+    if (targets.length > 0) {
+      const targetToSelect = selectedTargetId || selectedTarget?.target_id || selectedTarget?.id;
+      if (targetToSelect) {
+        const found = targets.find(t => (t.target_id || t.id) === targetToSelect);
+        if (found) setSelectedTarget(found);
+      }
     }
   }, [selectedTargetId, targets]);
 
-  // Handle live WebSocket incoming detection results
+  // Handle live WebSocket incoming detection results for visual highlight
   useEffect(() => {
-    if (!wsData) return;
-
-    if (wsData.type === 'NEW_DETECTION' && wsData.data) {
-      const newDet = wsData.data;
-      const targetId = newDet.target_id || newDet.id;
+    if (wsData && wsData.type === 'NEW_DETECTION' && wsData.data) {
+      const targetId = wsData.data.target_id || wsData.data.id;
       setNewlyDetectedId(targetId);
-
-      setTargets(prev => {
-        const existingIdx = prev.findIndex(t => (t.target_id || t.id) === targetId);
-        if (existingIdx >= 0) {
-          const updated = { ...prev[existingIdx] };
-          const obs = updated.observations || [];
-          updated.observations = [newDet, ...obs.filter(o => o.id !== newDet.id)];
-          updated.observation_count = updated.observations.length;
-          updated.confidence = newDet.confidence;
-          updated.fused_confidence = newDet.confidence;
-          updated.sonar_image_ref = newDet.sonar_image_ref || updated.sonar_image_ref;
-          const copy = [...prev];
-          copy[existingIdx] = updated;
-          return copy;
-        } else {
-          const newTarget = {
-            target_id: targetId,
-            id: targetId,
-            class: newDet.class,
-            category: newDet.class,
-            label: newDet.target_label,
-            latitude: newDet.latitude,
-            longitude: newDet.longitude,
-            estimated_size_m: newDet.estimated_size_m,
-            status: newDet.status || 'pending_review',
-            human_review_status: newDet.status || 'pending_review',
-            confidence: newDet.confidence,
-            fused_confidence: newDet.confidence,
-            observation_count: 1,
-            sonar_image_ref: newDet.sonar_image_ref,
-            mission_id: newDet.mission_id || 'MISSION-LIVE',
-            observations: [newDet]
-          };
-          return [newTarget, ...prev];
-        }
-      });
-
       const timer = setTimeout(() => {
         setNewlyDetectedId(null);
       }, 6000);
       return () => clearTimeout(timer);
     }
-
-    if (wsData.type === 'TARGET_REVIEWED' && wsData.data) {
-      const { target_id, status } = wsData.data;
-      setTargets(prev => prev.map(t => (t.target_id === target_id || t.id === target_id) ? { ...t, status, human_review_status: status } : t));
-      if (selectedTarget && (selectedTarget.target_id === target_id || selectedTarget.id === target_id)) {
-        setSelectedTarget(prev => ({ ...prev, status, human_review_status: status }));
-      }
-    }
   }, [wsData]);
 
   const handleReview = async (targetId, action) => {
     try {
-      const updated = await targetService.review(targetId, action);
-      setTargets(prev => prev.map(t => (t.target_id || t.id) === targetId ? updated : t));
-      if ((selectedTarget?.target_id || selectedTarget?.id) === targetId) {
-        setSelectedTarget(updated);
-      }
+      await reviewTarget(targetId, action);
     } catch (err) {
       alert(`Failed to update review status: ${err.message}`);
     }
@@ -270,11 +201,12 @@ export default function MapPage() {
           </div>
 
           <button
-            onClick={fetchData}
-            className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition"
+            onClick={() => refreshData({ silent: true })}
+            disabled={isRefreshing}
+            className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition cursor-pointer"
             title="Refresh GIS Layer"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>

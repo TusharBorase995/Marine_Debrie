@@ -22,7 +22,9 @@ export const Reports = () => {
     missions, 
     selectedMissionId, 
     setSelectedMissionId, 
-    selectedMission 
+    selectedMission,
+    getMissionReport,
+    reportsCache
   } = useMission();
 
   const [activeMission, setActiveMission] = useState(null);
@@ -41,19 +43,25 @@ export const Reports = () => {
     }
   }, [selectedMission, missions]);
 
-  // Load deterministic analysis whenever active mission changes
+  // Load deterministic analysis with in-memory caching (0ms instant render)
   useEffect(() => {
     let isMounted = true;
     const fetchAnalysis = async () => {
       if (!activeMission) return;
-      try {
+      const cached = reportsCache[activeMission.mission_id];
+      if (cached) {
+        setAnalysis(cached);
+        setLoading(false);
+      } else {
         setLoading(true);
+      }
+      try {
         setError(null);
-        const data = await exportService.getMissionAnalysis(activeMission.mission_id);
+        const data = await getMissionReport(activeMission.mission_id);
         if (isMounted) setAnalysis(data);
       } catch (err) {
         console.error('Failed to load mission analysis:', err);
-        if (isMounted) setError('Unable to compile mission analysis dataset.');
+        if (isMounted && !cached) setError('Unable to compile mission analysis dataset.');
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -61,7 +69,7 @@ export const Reports = () => {
 
     fetchAnalysis();
     return () => { isMounted = false; };
-  }, [activeMission]);
+  }, [activeMission, getMissionReport, reportsCache]);
 
   const handleDownloadPDF = async () => {
     if (!activeMission) return;
