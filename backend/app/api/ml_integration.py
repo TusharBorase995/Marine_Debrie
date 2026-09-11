@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Header, status
 
 from mock_data import db_mock
 from app.services.image_service import image_service
@@ -64,10 +64,10 @@ class FrameDetectionsPayload(BaseModel):
     detections: List[CanonicalDetectionPayload] = Field(..., description="List of target detections in this frame")
 
 
-async def _process_single_canonical_detection(payload: CanonicalDetectionPayload, mission_id: Optional[str] = None) -> Dict[str, Any]:
+async def _process_single_canonical_detection(payload: CanonicalDetectionPayload, mission_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Internal helper to process, persist, and broadcast a single CanonicalDetectionPayload."""
     from app.db.repository import repo
-    resolved_mission_id = repo.resolve_target_mission(mission_id, ingestion_mode="live")
+    resolved_mission_id = repo.resolve_target_mission(mission_id, ingestion_mode="live", user_id=user_id)
     ts = payload.timestamp or datetime.now(timezone.utc).isoformat()
     
     # Resolve and normalize sonar evidence image reference
@@ -168,7 +168,7 @@ async def _process_single_canonical_detection(payload: CanonicalDetectionPayload
     # Store detection in persistent PostgreSQL DB (mandatory)
     from app.db.repository import repo
     try:
-        repo.insert_detection(record)
+        repo.insert_detection(record, user_id=user_id)
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -191,7 +191,10 @@ async def _process_single_canonical_detection(payload: CanonicalDetectionPayload
 
 
 @router.post("/detections", status_code=status.HTTP_201_CREATED)
-async def ingest_ml_detection(payload: Union[FrameDetectionsPayload, CanonicalDetectionPayload]):
+async def ingest_ml_detection(
+    payload: Union[FrameDetectionsPayload, CanonicalDetectionPayload],
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
+):
     """
     POST /api/ml/detections — Primary ML System Ingestion Endpoint.
     Accepts:
@@ -201,12 +204,12 @@ async def ingest_ml_detection(payload: Union[FrameDetectionsPayload, CanonicalDe
     """
     if isinstance(payload, FrameDetectionsPayload):
         from app.db.repository import repo
-        target_mission = repo.resolve_target_mission(payload.mission_id, ingestion_mode="live")
+        target_mission = repo.resolve_target_mission(payload.mission_id, ingestion_mode="live", user_id=x_user_id)
         results = []
         for det in payload.detections:
             if not det.sonar_image_ref and payload.sonar_image_ref:
                 det.sonar_image_ref = payload.sonar_image_ref
-            res = await _process_single_canonical_detection(det, mission_id=target_mission)
+            res = await _process_single_canonical_detection(det, mission_id=target_mission, user_id=x_user_id)
             results.append(res["detection"])
         return {
             "success": True,
@@ -217,18 +220,19 @@ async def ingest_ml_detection(payload: Union[FrameDetectionsPayload, CanonicalDe
             "detections": results
         }
 
-    return await _process_single_canonical_detection(payload)
+    return await _process_single_canonical_detection(payload, user_id=x_user_id)
 
 @router.post("/upload-evidence", status_code=status.HTTP_201_CREATED)
 async def upload_sonar_evidence_image(
     file: UploadFile = File(...),
-    target_id: Optional[str] = Form(None)
+    target_id: Optional[str] = Form(None),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
     """
     POST /api/ml/upload-evidence — Uploads raw or cropped sonar evidence image accompanying detection.
     Returns the public image reference URL.
     """
-    image_url = await image_service.save_uploaded_image(file, target_id=target_id)
+    image_url = await image_service.save_uploaded_image(file, target_id=target_id, user_id=x_user_id)
     return {
         "success": True,
         "sonar_image_ref": image_url
@@ -245,14 +249,15 @@ async def ingest_detection_with_image(
     shadow_verified: bool = Form(True),
     status_str: str = Form("pending_review", alias="status"),
     timestamp: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    x_user_id: Optional[str] = Header(None, alias="x-user-id")
 ):
     """
     POST /api/ml/detection-with-image — Multipart endpoint allowing image binary upload + JSON metadata together.
     """
     image_url = None
     if file:
-        image_url = await image_service.save_uploaded_image(file, target_id=target_id)
+        image_url = await image_service.save_uploaded_image(file, target_id=target_id, user_id=x_user_id)
 
     payload = CanonicalDetectionPayload(
         target_id=target_id,
@@ -266,7 +271,7 @@ async def ingest_detection_with_image(
         timestamp=timestamp,
         sonar_image_ref=image_url
     )
-    return await ingest_ml_detection(payload)
+    return await ingest_ml_detection(payload, x_user_id=x_user_id)
 
 @router.post("/simulate", status_code=status.HTTP_400_BAD_REQUEST)
 async def simulate_ml_detection():

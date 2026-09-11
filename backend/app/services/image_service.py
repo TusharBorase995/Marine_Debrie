@@ -1,6 +1,6 @@
 import os
 import uuid
-import shutil
+import time
 from typing import Optional
 from fastapi import UploadFile
 
@@ -11,35 +11,61 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 class ImageService:
     """
     Service abstraction for managing detected sonar evidence images.
-    Saves uploaded/imported image files and provides their public URL paths.
-    No hardcoded mock images or fake fallback mappings.
+    Persists uploaded/imported image files directly into Neon Object Storage ('sagar-images' private bucket)
+    and registers image metadata in Neon PostgreSQL.
     """
 
     @staticmethod
-    def save_binary_image(data: bytes, filename: str) -> str:
-        """Saves binary image data (e.g. from zip extraction) and returns public URL."""
+    def save_binary_image(data: bytes, filename: str, user_id: Optional[str] = None) -> str:
+        """Saves binary image data into Neon Object Storage and returns public URL."""
         base_name = os.path.basename(filename)
         filepath = os.path.join(DETECTIONS_DIR, base_name)
-        with open(filepath, "wb") as buffer:
-            buffer.write(data)
-        return f"/uploads/detections/{base_name}"
+        try:
+            with open(filepath, "wb") as buffer:
+                buffer.write(data)
+        except Exception:
+            pass
+
+        ext = os.path.splitext(base_name)[1].lower()
+        mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
+        image_id = f"IMG-{os.path.splitext(base_name)[0]}-{int(time.time() * 1000)}"
+        try:
+            from app.db.repository import SonarRepository
+            SonarRepository.save_sonar_image(image_id, base_name, mime_type, data, user_id=user_id)
+            return f"/api/images/{image_id}"
+        except Exception as e:
+            print(f"[Neon Storage] Binary upload fallback: {e}")
+            return f"/uploads/detections/{base_name}"
 
     @staticmethod
-    async def save_uploaded_image(file: UploadFile, target_id: Optional[str] = None) -> str:
-        """Saves an uploaded image file from ML inference and returns its public URL path."""
+    async def save_uploaded_image(file: UploadFile, target_id: Optional[str] = None, user_id: Optional[str] = None) -> str:
+        """Saves an uploaded image file into Neon Object Storage and returns /api/images/{image_id} URL."""
         orig_name = file.filename or "sonar_evidence.png"
         ext = os.path.splitext(orig_name)[1].lower() or ".png"
         if ext not in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"]:
             ext = ".png"
         
         safe_tid = (target_id or "TGT").replace("/", "_").replace("\\", "_")
-        filename = f"{safe_tid}_{uuid.uuid4().hex[:8]}{ext}"
+        ts_token = int(time.time() * 1000)
+        filename = f"{safe_tid}_{ts_token}_{uuid.uuid4().hex[:6]}{ext}"
         filepath = os.path.join(DETECTIONS_DIR, filename)
 
-        with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        img_bytes = await file.read()
+        try:
+            with open(filepath, "wb") as buffer:
+                buffer.write(img_bytes)
+        except Exception:
+            pass
 
-        return f"/uploads/detections/{filename}"
+        mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
+        image_id = f"IMG-{safe_tid}-{ts_token}"
+        try:
+            from app.db.repository import SonarRepository
+            SonarRepository.save_sonar_image(image_id, filename, mime_type, img_bytes, user_id=user_id)
+            return f"/api/images/{image_id}"
+        except Exception as e:
+            print(f"[Neon Storage] Upload fallback: {e}")
+            return f"/uploads/detections/{filename}"
 
     @staticmethod
     def resolve_image_ref(image_ref: Optional[str], target_id: Optional[str] = None, target_class: Optional[str] = None) -> Optional[str]:
