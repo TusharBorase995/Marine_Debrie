@@ -200,6 +200,9 @@ export default function EvidenceViewerModal({
       activeTarget.human_review_status = updatedStatus;
       setSiblingStatusMap(prev => ({ ...prev, [tid]: updatedStatus }));
       onTargetReviewed?.(tid, updatedStatus);
+      if (action === 'confirm' || action === 'reject') {
+        onClose?.();
+      }
     } catch (err) {
       console.error('Failed to update review status:', err);
       alert('Error updating review: ' + (err.response?.data?.detail || err.message));

@@ -32,6 +32,8 @@ export default function Detections() {
     setSelectedTargetId,
     targets,
     detections,
+    setTargets,
+    setDetections,
     isInitialLoading,
     isRefreshing,
     refreshData,
@@ -737,14 +739,14 @@ export default function Detections() {
             setSelectedTargetId(t.target_id || t.id);
           }}
           onTargetReviewed={(tid, newStatus) => {
-            setTargets(prev => prev.map(t => (t.target_id === tid || t.id === tid) ? { ...t, status: newStatus, human_review_status: newStatus } : t));
+            setTargets?.(prev => prev.map(t => (t.target_id === tid || t.id === tid) ? { ...t, status: newStatus, human_review_status: newStatus } : t));
             if (selectedItem && (selectedItem.target_id === tid || selectedItem.id === tid)) {
               setSelectedItem(prev => ({ ...prev, status: newStatus, human_review_status: newStatus }));
             }
           }}
           onTargetDeleted={(tid) => {
-            setTargets(prev => prev.filter(t => (t.target_id || t.id) !== tid));
-            setDetections(prev => prev.filter(d => (d.target_id || d.id) !== tid));
+            setTargets?.(prev => prev.filter(t => (t.target_id || t.id) !== tid));
+            setDetections?.(prev => prev.filter(d => (d.target_id || d.id) !== tid));
             if (selectedItem && (selectedItem.target_id === tid || selectedItem.id === tid)) {
               setSelectedItem(null);
             }
