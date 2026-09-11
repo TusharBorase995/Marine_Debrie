@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   X, ZoomIn, ZoomOut, RotateCcw, 
   AlertCircle, CheckCircle2, XCircle, 
-  Target, Sparkles, MapPin, Clock
+  Target, Sparkles, MapPin, Clock, Trash2
 } from 'lucide-react';
 import { 
   formatConfidence, 
@@ -14,6 +14,7 @@ import {
   normalizeStatus
 } from '../utils/formatters';
 import targetService from '../services/targetService';
+import detectionService from '../services/detectionService';
 
 /**
  * Full Sonar Evidence Viewer Modal
@@ -31,7 +32,8 @@ export default function EvidenceViewerModal({
   allTargets = [],
   onClose,
   onTargetSelect,
-  onTargetReviewed
+  onTargetReviewed,
+  onTargetDeleted
 }) {
   const [activeTargetId, setActiveTargetId] = useState(target?.target_id || target?.id);
   const [hoveredTargetId, setHoveredTargetId] = useState(null);
@@ -165,6 +167,26 @@ export default function EvidenceViewerModal({
       alert('Error updating review: ' + (err.response?.data?.detail || err.message));
     } finally {
       setReviewing(false);
+    }
+  };
+
+  const handleDeleteActiveTarget = async () => {
+    if (!activeTarget) return;
+    const tid = activeTarget.target_id || activeTarget.id;
+    if (window.confirm(`Are you sure you want to permanently delete target ${tid}? This will remove it from the database.`)) {
+      try {
+        await detectionService.delete(tid);
+        onTargetDeleted?.(tid);
+        const remaining = siblingTargets.filter(t => (t.target_id || t.id) !== tid);
+        if (remaining.length > 0) {
+          selectTarget(remaining[0]);
+        } else {
+          onClose?.();
+        }
+      } catch (err) {
+        console.error('Delete target failed:', err);
+        alert('Failed to delete target: ' + (err.response?.data?.detail || err.message));
+      }
     }
   };
 
@@ -670,6 +692,16 @@ export default function EvidenceViewerModal({
                       Reset to Pending Review
                     </button>
                   )}
+
+                  {/* Delete Target from Database */}
+                  <button
+                    onClick={handleDeleteActiveTarget}
+                    className="w-full py-2 px-3 bg-red-50/60 hover:bg-red-50 text-red-600 hover:text-red-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-red-200 cursor-pointer active:scale-95 group shadow-2xs mt-2"
+                    title="Permanently remove target and observations"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                    Delete Target from Database
+                  </button>
                 </div>
 
               </div>

@@ -99,6 +99,10 @@ async def delete_target(target_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Target '{target_id}' not found")
 
+    # Invalidate in-memory cache
+    db_mock.targets = [t for t in db_mock.targets if t.get("target_id") != target_id and t.get("id") != target_id]
+    db_mock.detections = [d for d in db_mock.detections if d.get("target_id") != target_id and d.get("id") != target_id]
+
     await ws_manager.broadcast({
         "type": "TARGET_DELETED",
         "data": {"target_id": target_id}

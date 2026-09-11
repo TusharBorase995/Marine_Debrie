@@ -51,6 +51,9 @@ export default function Detections() {
   const [isEvidenceModalOpen, setIsEvidenceModalOpen] = useState(false);
   const [recentNewId, setRecentNewId] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteToast, setDeleteToast] = useState(null);
   const initialSelectionDoneRef = useRef(false);
 
   // Real-Time WebSocket Live Feed Integration
@@ -216,6 +219,13 @@ export default function Detections() {
         });
       }
     }
+
+    if (wsData.type === 'TARGET_DELETED' && wsData.data) {
+      const deletedId = wsData.data.target_id || wsData.data.id;
+      setTargets(prev => prev.filter(t => (t.target_id || t.id) !== deletedId));
+      setDetections(prev => prev.filter(d => (d.target_id || d.id) !== deletedId));
+      setSelectedItem(prev => (prev && (prev.target_id === deletedId || prev.id === deletedId)) ? null : prev);
+    }
   }, [wsData]);
 
   // Execute analyst review action with INSTANT optimistic local state update
@@ -267,6 +277,36 @@ export default function Detections() {
       console.error('Review action failed:', err);
       // Refresh on network error
       fetchData();
+    }
+  };
+
+  // Handle delete target with confirmation modal
+  const handleDeleteClick = (target, e) => {
+    if (e) e.stopPropagation();
+    setDeleteConfirmTarget(target);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmTarget) return;
+    const targetId = deleteConfirmTarget.target_id || deleteConfirmTarget.id;
+    setDeleteLoading(true);
+
+    // Optimistic instant local removal
+    setTargets(prev => prev.filter(t => (t.target_id || t.id) !== targetId));
+    setDetections(prev => prev.filter(d => (d.target_id || d.id) !== targetId));
+    setSelectedItem(prev => (prev && (prev.target_id === targetId || prev.id === targetId)) ? null : prev);
+
+    try {
+      await detectionService.delete(targetId);
+      setDeleteToast(`Target '${targetId}' was successfully deleted from database.`);
+      setTimeout(() => setDeleteToast(null), 4000);
+    } catch (err) {
+      console.error('Delete target failed:', err);
+      setError(`Failed to delete target: ${err.response?.data?.detail || err.message || 'Server error'}`);
+      fetchData(); // Rollback on network failure
+    } finally {
+      setDeleteLoading(false);
+      setDeleteConfirmTarget(null);
     }
   };
 
@@ -561,7 +601,7 @@ export default function Detections() {
                       <th className="p-3.5">SHADOW</th>
                       <th className="p-3.5">STATUS</th>
                       <th className="p-3.5">TIMESTAMP</th>
-                      <th className="p-3.5 text-right">REVIEW</th>
+                      <th className="p-3.5 text-right">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EDF5] text-[11px] font-mono">
@@ -658,7 +698,7 @@ export default function Detections() {
                               <button
                                 onClick={(e) => handleReviewAction(targetId, 'confirm', e)}
                                 title="Ground-Truth Confirm Target"
-                                className={`p-1.5 rounded-lg border transition ${
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
                                   tgt.status === 'confirmed' 
                                     ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
                                     : 'bg-emerald-50 hover:bg-emerald-100 text-[#10B981] border-emerald-200'
@@ -669,13 +709,20 @@ export default function Detections() {
                               <button
                                 onClick={(e) => handleReviewAction(targetId, 'reject', e)}
                                 title="Reject False Positive"
-                                className={`p-1.5 rounded-lg border transition ${
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
                                   tgt.status === 'rejected' 
                                     ? 'bg-red-100 text-red-800 border-red-300' 
                                     : 'bg-red-50 hover:bg-red-100 text-[#EF4444] border-red-200'
                                 }`}
                               >
                                 <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => handleDeleteClick(tgt, e)}
+                                title="Delete Detection from Database"
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 text-slate-400 hover:text-red-600 transition shadow-2xs group cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
                               </button>
                             </div>
                           </td>
@@ -749,6 +796,45 @@ export default function Detections() {
                         <span>{formatSize(tgt.estimated_size_m || 3.0)}</span>
                       </div>
                     </div>
+
+                    {/* Card Actions Footer */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <div className="text-[10px] font-mono text-slate-400">
+                        {Number(tgt.latitude || 0).toFixed(3)}°, {Number(tgt.longitude || 0).toFixed(3)}°
+                      </div>
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={(e) => handleReviewAction(targetId, 'confirm', e)}
+                          title="Confirm Ground Truth"
+                          className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                            tgt.status === 'confirmed' 
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-[#10B981] border-emerald-200'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleReviewAction(targetId, 'reject', e)}
+                          title="Reject False Positive"
+                          className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                            tgt.status === 'rejected' 
+                              ? 'bg-red-100 text-red-800 border-red-300' 
+                              : 'bg-red-50 hover:bg-red-100 text-[#EF4444] border-red-200'
+                          }`}
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteClick(tgt, e)}
+                          title="Delete Target"
+                          className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 text-slate-400 hover:text-red-600 transition shadow-2xs group cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                      </div>
+                    </div>
+
                   </div>
                 );
               })}
@@ -765,6 +851,7 @@ export default function Detections() {
                 onClose={() => setSelectedItem(null)}
                 onReview={(tid, act) => handleReviewAction(tid, act)}
                 onOpenEvidence={() => setIsEvidenceModalOpen(true)}
+                onDelete={() => handleDeleteClick(selectedItem)}
                 onViewOnMap={() => {
                   setSelectedTargetId(selectedItem.target_id || selectedItem.id);
                   navigate('/map');
@@ -792,10 +879,108 @@ export default function Detections() {
               setSelectedItem(prev => ({ ...prev, status: newStatus, human_review_status: newStatus }));
             }
           }}
+          onTargetDeleted={(tid) => {
+            setTargets(prev => prev.filter(t => (t.target_id || t.id) !== tid));
+            setDetections(prev => prev.filter(d => (d.target_id || d.id) !== tid));
+            if (selectedItem && (selectedItem.target_id === tid || selectedItem.id === tid)) {
+              setSelectedItem(null);
+            }
+            setDeleteToast(`Target '${tid}' was deleted.`);
+            setTimeout(() => setDeleteToast(null), 4000);
+          }}
         />
       )}
 
+      {/* Premium Delete Confirmation Modal */}
+      {deleteConfirmTarget && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => !deleteLoading && setDeleteConfirmTarget(null)}
+        >
+          <div 
+            className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden p-6 space-y-5 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center text-red-600 shrink-0 shadow-xs">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 inline-block">
+                  PERMANENT DELETION
+                </span>
+                <h3 className="text-lg font-black text-slate-900 tracking-tight font-sans">
+                  Delete Target Detection?
+                </h3>
+                <p className="text-xs text-slate-500 font-sans leading-relaxed">
+                  Are you sure you want to permanently remove target <strong className="font-mono text-slate-900">{deleteConfirmTarget.target_id || deleteConfirmTarget.id}</strong>? All multi-pass acoustic observations will be erased from PostgreSQL.
+                </p>
+              </div>
+            </div>
 
+            {/* Target Summary Snapshot */}
+            <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 grid grid-cols-2 gap-2 text-xs font-mono">
+              <div>
+                <span className="text-[10px] font-sans text-slate-400 block font-bold uppercase">Classification</span>
+                <span className="font-bold text-slate-800 truncate block">{formatClassLabel(deleteConfirmTarget.class || deleteConfirmTarget.category)}</span>
+              </div>
+              <div>
+                <span className="text-[10px] font-sans text-slate-400 block font-bold uppercase">Confidence</span>
+                <span className="font-bold text-emerald-600">{formatConfidence(deleteConfirmTarget.fused_confidence ?? deleteConfirmTarget.confidence)}</span>
+              </div>
+              <div>
+                <span className="text-[10px] font-sans text-slate-400 block font-bold uppercase">Coordinates</span>
+                <span className="text-slate-700">{Number(deleteConfirmTarget.latitude || 0).toFixed(4)}°, {Number(deleteConfirmTarget.longitude || 0).toFixed(4)}°</span>
+              </div>
+              <div>
+                <span className="text-[10px] font-sans text-slate-400 block font-bold uppercase">Status</span>
+                <span className="font-bold uppercase text-slate-700">{deleteConfirmTarget.status || 'pending_review'}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={() => setDeleteConfirmTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold text-xs transition cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={handleConfirmDelete}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-md shadow-red-500/20 disabled:opacity-50"
+              >
+                {deleteLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Permanently</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Success Toast */}
+      {deleteToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs font-sans font-bold px-4 py-3 rounded-2xl shadow-xl border border-slate-800 flex items-center gap-3 animate-in slide-in-from-bottom-3 duration-200">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>{deleteToast}</span>
+          <button onClick={() => setDeleteToast(null)} className="text-slate-400 hover:text-white ml-2 cursor-pointer">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
     </div>
   );

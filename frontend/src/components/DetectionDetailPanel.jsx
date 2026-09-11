@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, CheckCircle2, XCircle, X, Layers, Eye, MapPin, Sparkles, AlertCircle } from 'lucide-react';
+import { Target, CheckCircle2, XCircle, X, Layers, Eye, MapPin, Sparkles, AlertCircle, Trash2 } from 'lucide-react';
 import { 
   formatConfidence, 
   formatClassLabel, 
@@ -14,7 +14,8 @@ export const DetectionDetailPanel = ({
   onClose, 
   onReview, 
   onOpenEvidence,
-  onViewOnMap 
+  onViewOnMap,
+  onDelete
 }) => {
   const [selectedPassIndex, setSelectedPassIndex] = useState(0);
   const [localStatus, setLocalStatus] = useState(null);
@@ -300,6 +301,18 @@ export const DetectionDetailPanel = ({
           <Eye className="w-3.5 h-3.5 text-slate-500" />
           Open High-Res Frame &amp; Segmentation &rarr;
         </button>
+
+        {/* Delete Detection Button */}
+        {onDelete && (
+          <button
+            onClick={() => onDelete(targetId)}
+            className="w-full py-2 px-3 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-red-200 cursor-pointer active:scale-95 group shadow-2xs mt-1"
+            title="Permanently remove target and observations"
+          >
+            <Trash2 className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+            Delete Target from Database
+          </button>
+        )}
       </div>
 
     </div>

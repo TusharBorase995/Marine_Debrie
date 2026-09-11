@@ -299,6 +299,10 @@ async def delete_single_detection(detection_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Detection or Target '{detection_id}' not found")
 
+    # Invalidate in-memory cache
+    db_mock.targets = [t for t in db_mock.targets if t.get("target_id") != detection_id and t.get("id") != detection_id]
+    db_mock.detections = [d for d in db_mock.detections if d.get("target_id") != detection_id and d.get("id") != detection_id]
+
     await ws_manager.broadcast({
         "type": "TARGET_DELETED",
         "data": {"target_id": detection_id}

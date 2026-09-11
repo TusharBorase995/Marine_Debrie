@@ -26,6 +26,11 @@ export const detectionService = {
   async review(detectionId, action) {
     const res = await axios.post(`${API_BASE}/${detectionId}/review`, { action });
     return res.data;
+  },
+
+  async delete(detectionId) {
+    const res = await axios.delete(`${API_BASE}/${detectionId}`);
+    return res.data;
   }
 };
 
