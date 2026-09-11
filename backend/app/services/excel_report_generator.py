@@ -95,36 +95,47 @@ class ExcelReportGenerator:
         m_id = mission.get("mission_id", "MISSION-001")
 
         # -------------------------------------------------------------------------
-        # 1. Resolve Detection Records
+        # 1. Resolve Detection Records (Include ALL Mission Targets & Observations)
         # -------------------------------------------------------------------------
-        det_list: List[Dict[str, Any]] = []
-
-        # Priority A: explicitly passed detections or detections attached to analysis
-        candidate_dets = detections if detections is not None else analysis.get("detections")
-        if candidate_dets:
-            det_list = list(candidate_dets)
-
-        # Priority B: If empty, query database directly for this mission
-        if not det_list and m_id:
+        targets = analysis.get("targets") or analysis.get("priority_targets") or []
+        if not targets and m_id:
             try:
                 from app.db.repository import repo
-                db_dets = repo.get_all_detections(mission_id=m_id)
-                if db_dets:
-                    det_list = db_dets
+                targets = repo.get_consolidated_targets(mission_id=m_id)
             except Exception:
                 pass
 
-        # Priority C: Extract observations from targets
-        if not det_list:
-            targets = analysis.get("targets") or analysis.get("priority_targets") or []
-            extracted = []
-            for t in targets:
+        candidate_dets = detections if detections is not None else analysis.get("detections")
+        if candidate_dets is None and m_id:
+            try:
+                from app.db.repository import repo
+                candidate_dets = repo.get_all_detections(mission_id=m_id)
+            except Exception:
+                pass
+
+        det_list: List[Dict[str, Any]] = []
+        covered_target_ids = set()
+
+        # Step 1: Add all observations from detections list
+        if candidate_dets:
+            for d in candidate_dets:
+                det_list.append(d)
+                tid = d.get("target_id")
+                if tid:
+                    covered_target_ids.add(tid)
+
+        # Step 2: Ensure EVERY target in the mission is included!
+        for t in (targets or []):
+            tid = t.get("target_id") or t.get("id")
+            if tid not in covered_target_ids:
                 obs_list = t.get("observations") or []
                 if obs_list:
-                    extracted.extend(obs_list)
+                    for o in obs_list:
+                        det_list.append(o)
                 else:
-                    extracted.append(t)
-            det_list = extracted
+                    det_list.append(t)
+                if tid:
+                    covered_target_ids.add(tid)
 
         # Sort detections by pass number, then target_id, then timestamp if available
         def sort_key(d: Dict[str, Any]):
@@ -222,13 +233,15 @@ class ExcelReportGenerator:
                 except (ValueError, TypeError):
                     pass
 
-            # Estimated size
-            size_val: Optional[float] = None
-            if det.get("estimated_size_m") is not None:
+            # Estimated size (defaults to 3.0m if 0 or missing)
+            raw_size = det.get("estimated_size_m")
+            size_val: float = 3.0
+            if raw_size is not None:
                 try:
-                    size_val = float(det["estimated_size_m"])
+                    s_float = float(raw_size)
+                    size_val = s_float if s_float > 0 else 3.0
                 except (ValueError, TypeError):
-                    pass
+                    size_val = 3.0
 
             # Shadow verification
             sv = det.get("shadow_verified")
