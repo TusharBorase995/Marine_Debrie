@@ -7,9 +7,21 @@ export const useWebSocket = (url) => {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname || 'localhost';
-    const fullUrl = url.startsWith('ws') ? url : `${wsProtocol}//${wsHost}:8000${url}`;
+    let fullUrl;
+    const envWsUrl = import.meta.env.VITE_WS_URL;
+
+    if (url.startsWith('ws://') || url.startsWith('wss://')) {
+      fullUrl = url;
+    } else if (envWsUrl) {
+      const cleanBase = envWsUrl.replace(/\/$/, '');
+      fullUrl = `${cleanBase}${url.startsWith('/') ? '' : '/'}${url}`;
+    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      fullUrl = `${wsProtocol}//${window.location.hostname}:8000${url}`;
+    } else {
+      // Production live WebSocket stream on Render
+      fullUrl = `wss://marine-debrie.onrender.com${url.startsWith('/') ? '' : '/'}${url}`;
+    }
 
     try {
       const ws = new WebSocket(fullUrl);
