@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Compass, Plus, Search, FileText, CheckCircle2, 
   Trash2, UploadCloud, AlertCircle, Radio, Archive,
-  MapPin, Clock, Filter, X, Database
+  MapPin, Clock, Filter, X, Database, RefreshCw
 } from 'lucide-react';
 import { useMission } from '../context/MissionContext';
 
